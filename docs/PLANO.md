@@ -34,8 +34,11 @@ Marque cada item quando terminar. Faça testes junto com cada módulo.
 - Cliente falso do Groq com respostas gravadas à mão (sem rede e sem chave).
 - Casos ruins: JSON quebrado, identificador inexistente, tempo esgotado, limite de uso.
 
+- [x] `modo_offline`: assistente local e reserva automática quando o Groq falha
+- [x] `offline/`: scripts para instalar sem internet (não testados com Flet real)
+
 ## Estado atual
 
-Tudo acima está escrito e testado (215 testes). Pendente: rodar as telas com o Flet de verdade
+Tudo acima está escrito e testado (276 testes). Pendente: rodar as telas com o Flet de verdade
 (`flet run`), porque os testes das telas usam um Flet de mentira e não conferem a aparência
 nem detalhes da API (área de transferência, campos de texto).

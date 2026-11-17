@@ -45,8 +45,8 @@ def montar(app: AppChurrasco) -> list[ft.Control]:
                     "horas fazer cada coisa."),
         ft.Button("Planejar um churrasco", on_click=_novo(app)),
         ft.Text("IA conectada: o Mestre do Churrasco pode ajudar." if ia_ligada else
-                "IA desligada. O app funciona sem ela; para ligar, coloque a chave do Groq "
-                "em Configurações.", size=13, color=w.VERDE if ia_ligada else w.CINZA),
+                "Modo offline: o app planeja e responde dúvidas sem internet. Para ligar a "
+                "IA, coloque a chave do Groq em Configurações.", size=13, color=w.VERDE if ia_ligada else w.CINZA),
     ]
     salvos = app.banco.listar()
     if salvos:

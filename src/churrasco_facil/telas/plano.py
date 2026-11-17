@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING, Any, Callable
 
 import flet as ft
 
-from ..assistente import Assistente
 from ..catalogo_carnes import CORTES, VEGETARIANO, Corte
 from ..cliente_groq import ErroGroq
 from ..compartilhar import texto_whatsapp
@@ -94,15 +93,17 @@ def montar(app: AppChurrasco) -> list[ft.Control]:
         app.ocupado, mensagem.value = True, "O Mestre está pensando..."
         app.atualizar()
         try:
-            texto = await Assistente(app.cliente()).explicar(plano)
+            assistente = app.assistente()
+            texto = await assistente.explicar(plano)
             app.plano = montar_plano(plano.pedido, app.parametros(), app.config.precos, texto)
             if app.plano_id is not None:
                 app.banco.atualizar_explicacao(app.plano_id, texto)
             app.ocupado = False
+            app.aviso = assistente.aviso
             app.ir_plano()
             return
-        except ErroGroq as erro:
-            mensagem.value = erro.mensagem_usuario
+        except (ErroGroq, ValueError) as erro:
+            mensagem.value = getattr(erro, "mensagem_usuario", str(erro))
         app.ocupado = False
         app.atualizar()
 
@@ -122,8 +123,7 @@ def montar(app: AppChurrasco) -> list[ft.Control]:
                           "Selecione o texto abaixo e copie.")
         app.atualizar()
 
-    pedir = ft.OutlinedButton("Pedir explicação ao Mestre (IA)", on_click=pedir_explicacao,
-                              disabled=not cliente_ok)
+    pedir = ft.OutlinedButton("Explicar o plano", on_click=pedir_explicacao)
     controles: list[ft.Control] = [
         w.titulo(plano.pedido.nome), w.subtitulo(descrever_data(plano.pedido.hora_servir)),
         mensagem, _cartao_de_custo(plano),
@@ -141,7 +141,8 @@ def montar(app: AppChurrasco) -> list[ft.Control]:
     if not plano.explicacao:
         controles.append(pedir)
         if not cliente_ok:
-            controles.append(ft.Text("Precisa da chave do Groq (Configurações).", size=12,
+            controles.append(ft.Text("Sem a chave do Groq, a explicação é feita pelo "
+                                     "assistente do app, sem internet.", size=12,
                                      color=w.CINZA))
     controles += _avisos(plano)
     controles += [

@@ -133,7 +133,7 @@ def preparar_rascunho(app):
 def test_inicio_sem_chave_explica_que_funciona_sem_ia(app, pagina):
     app.ir_inicio()
     assert "Churrasco Fácil" in textos(pagina)
-    assert any("IA desligada" in t for t in textos(pagina))
+    assert any("Modo offline" in t for t in textos(pagina))
     assert achar(pagina, "Planejar um churrasco").on_click is not None
 
 
@@ -156,7 +156,7 @@ def test_passo_1_mostra_os_contadores_e_o_campo_de_texto(app, pagina):
     for rotulo in ("Adultos", "Crianças", "Vegetarianos (entre os adultos)",
                    "Adultos que bebem álcool"):
         assert rotulo in textos(pagina)
-    assert achar(pagina, "Entender com IA").on_click is not None
+    assert achar(pagina, "Entender o texto").on_click is not None
 
 
 def test_passo_numerico_fora_do_intervalo_cai_nos_limites(app, pagina):
@@ -186,29 +186,31 @@ def test_entender_com_ia_preenche_o_rascunho(app, pagina):
                                '"bebem_alcool": null, "orcamento_reais": 400}')
     app.rascunho.texto_livre = "churrasco para 12 adultos e 3 crianças"
     app.ir_assistente(0)
-    clicar(achar(pagina, "Entender com IA"))
+    clicar(achar(pagina, "Entender o texto"))
     r = app.rascunho
     assert (r.adultos, r.criancas, r.vegetarianos, r.orcamento_texto) == (12, 3, 1, "400,00")
     assert any("Entendi: 12 adultos" in t for t in textos(pagina))
     assert "12 adultos e 3" in transporte.chamadas[0]["corpo"]["messages"][-1]["content"]
 
 
-def test_entender_com_ia_sem_chave_avisa_e_nao_chama_a_rede(app, pagina):
+def test_entender_sem_chave_usa_o_assistente_local(app, pagina):
+    app.rascunho.texto_livre = "churrasco para 12 adultos, 3 crianças e uns 400 reais"
     app.ir_assistente(0)
-    clicar(achar(pagina, "Entender com IA"))
-    assert any("chave do Groq" in (c.value or "") for raiz in pagina.adicionados
-               for c in todos(raiz))
+    clicar(achar(pagina, "Entender o texto"))
+    r = app.rascunho
+    assert (r.adultos, r.criancas, r.orcamento_texto) == (12, 3, "400,00")
+    assert any("Entendi: 12 adultos" in t for t in textos(pagina))
 
 
-def test_entender_com_ia_com_erro_mostra_mensagem_simples(app, pagina):
+def test_entender_com_groq_recusando_a_chave_usa_o_modo_offline(app, pagina):
     app.config.chave_groq = "chave"
     transporte = TransporteFalso((401, {}, ""))
     app.cliente = lambda: ClienteGroq("chave", transporte=transporte, dormir=sem_espera)
     app.rascunho.texto_livre = "12 adultos"
     app.ir_assistente(0)
-    clicar(achar(pagina, "Entender com IA"))
-    assert any("recusou a chave" in t for t in textos(pagina))
-    assert app.ocupado is False
+    clicar(achar(pagina, "Entender o texto"))
+    assert any("recusou a chave" in t and "modo offline" in t for t in textos(pagina))
+    assert app.rascunho.adultos == 12 and app.ocupado is False
 
 
 def test_passo_2_tem_data_hora_duracao_e_orcamento(app, pagina):
@@ -221,13 +223,22 @@ def test_passo_2_tem_data_hora_duracao_e_orcamento(app, pagina):
     assert app.rascunho.data_texto == "25/12/2099"
 
 
-def test_montar_plano_sem_ia(app, pagina):
+def test_montar_plano_sem_chave_usa_sugestao_local(app, pagina):
     preparar_rascunho(app)
     app.ir_assistente(2)
     clicar(achar(pagina, "Montar plano"))
     assert app.plano is not None and app.plano.pedido.nome == "Festa"
-    assert app.plano.pedido.pesos_preferidos == {}
+    assert app.plano.pedido.pesos_preferidos        # cortes escolhidos pelo assistente local
+    assert any("fácil de acertar" in t for t in textos(pagina))
     assert "Festa" in textos(pagina) and app.ocupado is False
+
+
+def test_montar_plano_com_a_chave_desligada_pelo_usuario_usa_a_mistura_padrao(app, pagina):
+    preparar_rascunho(app)
+    app.rascunho.usar_ia = False
+    app.ir_assistente(2)
+    clicar(achar(pagina, "Montar plano"))
+    assert app.plano.pedido.pesos_preferidos == {}
 
 
 def test_montar_plano_com_data_invalida_mostra_erro_e_nao_avanca(app, pagina):
@@ -256,16 +267,15 @@ def test_montar_plano_com_ia_usa_so_cortes_validos_e_mostra_motivos(app, pagina)
     assert any("Por que escolhi: fácil de acertar" in t for t in textos(pagina))
 
 
-def test_montar_plano_com_ia_fora_do_ar_usa_o_plano_padrao(app, pagina):
+def test_montar_plano_com_groq_fora_do_ar_usa_o_modo_offline(app, pagina):
     preparar_rascunho(app)
     app.config.chave_groq = "chave"
     app.cliente = lambda: ClienteGroq("chave", transporte=TransporteFalso(OSError("x")),
                                       tentativas=1)
     app.ir_assistente(2)
     clicar(achar(pagina, "Montar plano"))
-    assert app.plano is not None and app.plano.compras.mistura == "tradicional"
-    assert any(t.startswith("Montei sem a IA desta vez.") for t in textos(pagina))
-
+    assert app.plano is not None and app.plano.pedido.pesos_preferidos
+    assert any("modo offline" in t for t in textos(pagina))
 
 # ---------------------------------------------------------------- plano
 
@@ -324,26 +334,35 @@ def test_plano_salvo_aparece_no_inicio_e_abre_de_novo(app, pagina, pedido):
     assert app.banco.listar() == [] and "Planos salvos" not in textos(pagina)
 
 
-def test_explicacao_da_ia_aparece_e_e_salva(app, pagina, pedido):
+def test_explicacao_local_aparece_e_e_salva(app, pagina, pedido):
     plano_aberto(app, pedido)
     clicar(achar(pagina, "Salvar"))
-    assert achar(pagina, "Pedir explicação ao Mestre (IA)").disabled is True   # sem chave
+    clicar(achar(pagina, "Explicar o plano"))      # sem chave: assistente local
+    assert any(t.startswith("Para 13 pessoas, o plano compra") for t in textos(pagina))
+    assert app.banco.carregar(app.plano_id)[1].startswith("Para 13 pessoas")
+    assert "Explicar o plano" not in textos(pagina)
+
+
+def test_explicacao_com_groq_aparece_e_e_salva(app, pagina, pedido):
+    plano_aberto(app, pedido)
+    clicar(achar(pagina, "Salvar"))
     com_groq(app, "Comece pelos cortes fáceis e relaxe.")
     app.ir_plano()
-    clicar(achar(pagina, "Pedir explicação ao Mestre (IA)"))
+    clicar(achar(pagina, "Explicar o plano"))
     assert "Comece pelos cortes fáceis e relaxe." in textos(pagina)
     assert app.banco.carregar(app.plano_id)[1] == "Comece pelos cortes fáceis e relaxe."
-    assert "Pedir explicação ao Mestre (IA)" not in textos(pagina)
 
 
-def test_explicacao_com_erro_mostra_a_mensagem(app, pagina, pedido):
+def test_explicacao_com_groq_limitado_cai_para_o_modo_offline(app, pagina, pedido):
     plano_aberto(app, pedido)
     app.config.chave_groq = "chave"
     app.cliente = lambda: ClienteGroq("chave", transporte=TransporteFalso((429, {}, "")),
                                       tentativas=1)
     app.ir_plano()
-    clicar(achar(pagina, "Pedir explicação ao Mestre (IA)"))
-    assert any("Muitos pedidos" in t for t in textos(pagina)) and app.ocupado is False
+    clicar(achar(pagina, "Explicar o plano"))
+    assert any("Muitos pedidos" in t and "modo offline" in t for t in textos(pagina))
+    assert any(t.startswith("Para 13 pessoas") for t in textos(pagina))
+    assert app.ocupado is False
 
 
 def test_compartilhar_mostra_o_texto_e_copia_quando_o_flet_deixa(modulos, tmp_path, pedido):
@@ -381,24 +400,26 @@ def test_conversa_responde_e_mostra_no_historico(app, pagina, pedido):
     assert app.ocupado is False
 
 
-def test_conversa_sem_chave_desabilita_os_botoes(app, pagina, pedido):
+def test_conversa_sem_chave_responde_com_dicas_prontas(app, pagina, pedido):
     plano_aberto(app, pedido)
     app.ir_conversa()
-    assert achar(pagina, "Enviar").disabled is True
-    assert any("chave do Groq" in t for t in textos(pagina))
+    assert achar(pagina, "Enviar").disabled is False
+    assert any("Modo offline" in t for t in textos(pagina))
+    clicar(achar(pagina, "E se começar a chover?"))
+    assert any("monóxido de carbono" in t for t in textos(pagina))
+    assert app.ocupado is False
 
 
-def test_conversa_com_erro_tira_a_pergunta_da_tela(app, pagina, pedido):
+def test_conversa_com_groq_recusando_responde_offline(app, pagina, pedido):
     plano_aberto(app, pedido)
     app.config.chave_groq = "chave"
     app.cliente = lambda: ClienteGroq("chave", transporte=TransporteFalso((401, {}, "")),
                                       tentativas=1)
     app.ir_conversa()
     clicar(achar(pagina, "E se começar a chover?"))
-    # sobra só o botão de sugestão: o balão da pergunta não respondida saiu da tela
-    assert textos(pagina).count("E se começar a chover?") == 1
-    assert app.conversa.historico == []
-    assert any("recusou a chave" in t for t in textos(pagina))
+    assert any(t.startswith("Chuva fina") for t in textos(pagina))
+    assert "Sem internet: respondi com dicas prontas." in textos(pagina)
+    assert len(app.conversa.historico) == 2
 
 
 def test_limpar_conversa(app, pagina, pedido):

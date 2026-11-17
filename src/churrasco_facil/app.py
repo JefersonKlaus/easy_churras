@@ -3,13 +3,15 @@ from __future__ import annotations
 
 import inspect
 import logging
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import flet as ft
 
 from .armazenamento import Armazenamento
 from .calculadora import Parametros
+from .assistente import Assistente
 from .cliente_groq import ClienteGroq
+from .modo_offline import AssistenteComReserva, AssistenteLocal, ConversaLocal
 from .configuracao import (Configuracao, carregar_configuracao, cliente_da_configuracao,
                            parametros_da_configuracao)
 from .conversa import Conversa
@@ -33,13 +35,20 @@ class AppChurrasco:
         self.plano_id: Optional[int] = None
         self.motivos: dict[str, str] = {}      # por que o Groq sugeriu cada corte
         self.aviso: str = ""                   # recado para a próxima tela (ex.: sem IA)
-        self.conversa: Optional[Conversa] = None
+        self.conversa: Optional[Union[Conversa, ConversaLocal]] = None
         self.ocupado = False
 
     # ------------------------------------------------------------------ ajudantes
 
     def cliente(self) -> ClienteGroq:
         return cliente_da_configuracao(self.config)
+
+    def assistente(self):
+        """Assistente com IA e reserva offline; sem chave, só o assistente local."""
+        cliente = self.cliente()
+        if not cliente.configurado:
+            return AssistenteLocal()
+        return AssistenteComReserva(Assistente(cliente))
 
     def parametros(self) -> Parametros:
         return parametros_da_configuracao(self.config)
@@ -91,7 +100,12 @@ class AppChurrasco:
 
     def ir_conversa(self) -> None:
         if self.plano is not None and self.conversa is None:
-            self.conversa = Conversa(self.cliente(), resumo_plano(self.plano))
+            cliente = self.cliente()
+            if cliente.configurado:
+                self.conversa = Conversa(cliente, resumo_plano(self.plano),
+                                         ConversaLocal(self.plano))
+            else:
+                self.conversa = ConversaLocal(self.plano)
         self.mostrar(conversa.montar(self))
 
     def ir_configuracoes(self) -> None:

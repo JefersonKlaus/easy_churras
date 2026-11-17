@@ -228,3 +228,6 @@ __marimo__/
 *.sqlite3
 *.db
 .flet/
+
+# pacote offline (grande, gerado por offline/baixar_pacotes.py)
+vendor/

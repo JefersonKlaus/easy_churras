@@ -25,12 +25,11 @@ def montar(app: AppChurrasco) -> list[ft.Control]:
     if conversa is None:
         return [w.titulo("Abra um plano primeiro"),
                 ft.Button("Início", on_click=lambda _e: app.ir_inicio())]
-    cliente_ok = app.cliente().configurado
+    cliente_ok = True       # sem chave ou sem internet, o assistente local responde
     historico = ft.Column(controls=[_balao(m["content"], m["role"] == "user")
                                     for m in conversa.historico], spacing=8)
-    mensagem = ft.Text("" if cliente_ok else
-                       "Para conversar, coloque a chave do Groq em Configurações. O resto do "
-                       "app funciona sem ela.", size=13, color=w.CINZA)
+    mensagem = ft.Text("Modo offline: respondo com dicas prontas de churrasco."
+                       if getattr(conversa, "offline", False) else "", size=13, color=w.CINZA)
     pergunta = {"texto": ""}
     campo = ft.TextField(label="Sua dúvida", multiline=True, min_lines=1, max_lines=4,
                          disabled=not cliente_ok,
@@ -45,7 +44,9 @@ def montar(app: AppChurrasco) -> list[ft.Control]:
         try:
             resposta = await conversa.perguntar(texto)
             historico.controls.append(_balao(resposta, False))
-            mensagem.value, campo.value, pergunta["texto"] = "", "", ""
+            mensagem.value = ("Sem internet: respondi com dicas prontas."
+                              if getattr(conversa, "offline", False) else "")
+            campo.value, pergunta["texto"] = "", ""
         except ErroGroq as erro:
             historico.controls.pop()   # a pergunta não foi respondida: tira da tela
             mensagem.value = erro.mensagem_usuario

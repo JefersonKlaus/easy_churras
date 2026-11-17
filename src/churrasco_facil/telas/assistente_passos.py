@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 import flet as ft
 
-from ..assistente import Assistente, pesos_das_sugestoes
+from ..assistente import pesos_das_sugestoes
 from ..cliente_groq import ErroGroq
 from ..entradas import ler_orcamento
 from ..planejador import Pedido, montar_plano
@@ -72,25 +72,23 @@ def _passo_convidados(app: AppChurrasco) -> list[ft.Control]:
     async def entender(_evento: Any) -> None:
         if app.ocupado:
             return
-        cliente = app.cliente()
-        if not cliente.configurado:
-            mensagem.value = "Para usar a IA, coloque a chave do Groq em Configurações."
-            mensagem.color = w.VERMELHO
-            app.atualizar()
-            return
         app.ocupado, mensagem.value, mensagem.color = True, "Lendo o seu pedido...", w.CINZA
         app.atualizar()
+        assistente = app.assistente()
+        aviso_reserva = ""
         try:
-            entendido = await Assistente(cliente).interpretar_pedido(r.texto_livre)
+            entendido = await assistente.interpretar_pedido(r.texto_livre)
+            aviso_reserva = f"{assistente.aviso} " if assistente.aviso else ""
             mudou = r.aplicar_interpretacao(
                 entendido.adultos, entendido.criancas, entendido.vegetarianos,
                 entendido.bebem_alcool, entendido.duracao_horas, entendido.orcamento_centavos)
             if mudou:
                 faltou = (f" Falta confirmar: {', '.join(entendido.faltando)}."
                           if entendido.faltando else "")
-                resultado = f"Entendi: {', '.join(mudou)}.{faltou} Confira os números."
+                resultado = (f"{aviso_reserva}Entendi: {', '.join(mudou)}.{faltou} "
+                             "Confira os números.")
             else:
-                resultado = "Não consegui entender números no seu texto."
+                resultado = f"{aviso_reserva}Não consegui entender números no seu texto."
         except ErroGroq as erro:
             resultado = erro.mensagem_usuario
         except ValueError as erro:
@@ -105,7 +103,7 @@ def _passo_convidados(app: AppChurrasco) -> list[ft.Control]:
         controles.append(ft.Text(app.aviso, size=13, color=w.CINZA))
         app.aviso = ""
     controles += [c.controle for c in contadores.values()]
-    controles += [texto_livre, ft.OutlinedButton("Entender com IA", on_click=entender),
+    controles += [texto_livre, ft.OutlinedButton("Entender o texto", on_click=entender),
                   mensagem,
                   _navegacao(app, 0, ft.Button("Próximo", on_click=_ir(app, 1)))]
     return controles
@@ -137,8 +135,9 @@ def _passo_revisar(app: AppChurrasco) -> list[ft.Control]:
     r = app.rascunho
     mensagem = ft.Text("", size=14, color=w.VERMELHO)
     ia_disponivel = app.cliente().configurado
-    chave_ia = ft.Switch(label="Deixar a IA sugerir os cortes", value=r.usar_ia and ia_disponivel,
-                         disabled=not ia_disponivel,
+    chave_ia = ft.Switch(label=("Deixar a IA sugerir os cortes" if ia_disponivel
+                                else "Sugerir os cortes automaticamente (sem internet)"),
+                         value=r.usar_ia,
                          on_change=lambda e: setattr(r, "usar_ia", bool(e.control.value)))
 
     async def criar(_evento: Any) -> None:
@@ -158,14 +157,15 @@ def _passo_revisar(app: AppChurrasco) -> list[ft.Control]:
         motivos: dict[str, str] = {}
         aviso = ""
         try:
-            if r.usar_ia and app.cliente().configurado:
+            if r.usar_ia:
+                assistente = app.assistente()
                 try:
-                    sugestoes = await Assistente(app.cliente()).sugerir_cortes(convidados,
-                                                                               orcamento)
+                    sugestoes = await assistente.sugerir_cortes(convidados, orcamento)
                     pesos = pesos_das_sugestoes(sugestoes)
                     motivos = {s.id: s.motivo for s in sugestoes if s.motivo}
-                except ErroGroq as erro:
-                    aviso = f"Montei sem a IA desta vez. {erro.mensagem_usuario}"
+                    aviso = assistente.aviso
+                except (ErroGroq, ValueError) as erro:
+                    aviso = f"Montei com o plano padrão desta vez. {getattr(erro, 'mensagem_usuario', erro)}"
             pedido = Pedido(convidados, hora, orcamento, pesos, r.nome.strip() or "Meu churrasco")
             plano = montar_plano(pedido, app.parametros(), app.config.precos)
         finally:
