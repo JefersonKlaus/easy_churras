@@ -1,31 +1,49 @@
 # Churrasco Fácil
 
-Aplicativo em Python + Flet que ajuda **quem nunca fez churrasco** a planejar o seu: quanto
-comprar, quanto vai custar, o que fazer e a que horas, tudo em linguagem simples.
+App em Python + Flet para quem nunca organizou um churrasco. Você diz quantas pessoas vêm, o
+orçamento e a hora de servir; o app calcula **quanto comprar**, **quanto vai custar**, **a que
+horas acender o carvão e colocar cada corte** e mostra os **avisos de segurança**.
 
-> Status: **em planejamento**. Este repositório ainda não tem código do aplicativo.
+A IA (Groq) só conversa: entende o pedido escrito livremente, sugere cortes do catálogo,
+explica o plano e responde dúvidas. **Toda conta e toda regra de segurança é feita pelo
+código**, e tudo que a IA devolve é validado. Sem chave do Groq o app funciona normalmente.
 
-## Ideia central
+## Como rodar
 
-- **O código faz as contas** (quantidades, custo, horários) e guarda as regras de segurança.
-- **A IA do Groq conversa**: entende o pedido em texto livre, escolhe cortes de um catálogo,
-  explica em palavras simples e responde dúvidas.
-- O app continua útil **sem internet**: calculadora, lista e cronograma não dependem do Groq.
-
-## Estrutura prevista
-
-```
-src/churrasco_facil/      código do aplicativo (nomes de módulos e funções em português)
-src/churrasco_facil/telas/  telas do Flet
-tests/                    testes
-docs/                     decisões e anotações
+```bash
+pip install -e ".[dev]"      # ou: pip install "flet>=1.0" pytest
+flet run                     # abre o app (usa src/main.py)
 ```
 
-## Segredos
+Testes (não precisam de rede nem de chave):
 
-A chave do Groq vem da variável de ambiente `GROQ_API_KEY` (veja `.env.exemplo`).
-Nunca coloque chaves ou senhas no código nem no repositório.
+```bash
+PYTHONPATH=src python3 -m pytest -q tests
+```
 
-## Plano de trabalho
+## Chave do Groq (opcional)
 
-Veja [docs/PLANO.md](docs/PLANO.md).
+- Variável de ambiente `GROQ_API_KEY` (tem prioridade), ou
+- tela **Configurações** do app (salva em arquivo só do seu usuário, fora do projeto).
+
+Nunca coloque a chave no código nem no GitHub. O arquivo `.env` está no `.gitignore`;
+use `.env.exemplo` como modelo. O modelo padrão é `llama-3.3-70b-versatile` e pode ser trocado
+em Configurações (os nomes de modelos mudam com o tempo; confira a documentação do Groq).
+
+## Onde ficam os dados
+
+Pasta definida por `CHURRASCO_DADOS`; se não existir, `FLET_APP_STORAGE_DATA`; senão
+`~/.churrasco_facil`. Lá ficam o banco de planos salvos e a configuração.
+
+## Estrutura
+
+- `calculadora`, `orcamento`, `cronograma`, `lista_compras`, `seguranca`: a lógica (sem IA).
+- `catalogo_carnes`, `catalogo_itens`, `produtos`, `dinheiro`: catálogo e dinheiro em centavos.
+- `cliente_groq`, `prompts`, `esquemas`, `assistente`, `conversa`: a camada de IA.
+- `planejador`, `armazenamento`, `compartilhar`, `configuracao`, `entradas`: junta tudo.
+- `app` e `telas/`: interface Flet.
+
+## Aviso
+
+Os preços do catálogo são estimativas editáveis em Configurações. As regras de segurança
+(carvão só ao ar livre, frango bem passado, termômetro) valem como orientação geral.

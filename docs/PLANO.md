@@ -15,21 +15,27 @@ Marque cada item quando terminar. Faça testes junto com cada módulo.
 
 ## Ordem de construção (versão enxuta)
 
-- [ ] `catalogo_carnes`: cortes, tempo de preparo, ponto, dificuldade, substitutos
-- [ ] `calculadora`: quantidades por perfil de convidado (tabela editável)
-- [ ] `orcamento`: custo e ajuste ao valor disponível
-- [ ] `cronograma`: horários calculados de trás para frente a partir da hora de servir
-- [ ] `lista_compras`: itens agrupados por seção do mercado
-- [ ] `seguranca`: regras fixas (monóxido de carbono, ponto da carne, contaminação)
-- [ ] `esquemas`: validação do JSON devolvido pelo Groq
-- [ ] `prompts`: instruções em português
-- [ ] `cliente_groq`: chamada à API, tempo limite, tentativas, erro 429
-- [ ] `planejador`: junta pedido, cálculo e plano
-- [ ] `armazenamento`: SQLite com os planos salvos
-- [ ] `compartilhar`: texto para colar no WhatsApp
-- [ ] `telas/`: assistente em passos, plano, lista, cronograma, conversa, configurações
+- [x] `catalogo_carnes`: cortes, tempo de preparo, ponto, dificuldade, substitutos
+- [x] `calculadora`: quantidades por perfil de convidado (tabela editável)
+- [x] `orcamento`: custo e ajuste ao valor disponível
+- [x] `cronograma`: horários calculados de trás para frente a partir da hora de servir
+- [x] `lista_compras`: itens agrupados por seção do mercado
+- [x] `seguranca`: regras fixas (monóxido de carbono, ponto da carne, contaminação)
+- [x] `esquemas`: validação do JSON devolvido pelo Groq
+- [x] `prompts`: instruções em português
+- [x] `cliente_groq`: chamada à API, tempo limite, tentativas, erro 429
+- [x] `planejador`: junta pedido, cálculo e plano
+- [x] `armazenamento`: SQLite com os planos salvos
+- [x] `compartilhar`: texto para colar no WhatsApp
+- [x] `telas/`: assistente em passos, plano, lista, cronograma, conversa, configurações
 
 ## Testes
 
 - Cliente falso do Groq com respostas gravadas à mão (sem rede e sem chave).
 - Casos ruins: JSON quebrado, identificador inexistente, tempo esgotado, limite de uso.
+
+## Estado atual
+
+Tudo acima está escrito e testado (215 testes). Pendente: rodar as telas com o Flet de verdade
+(`flet run`), porque os testes das telas usam um Flet de mentira e não conferem a aparência
+nem detalhes da API (área de transferência, campos de texto).
