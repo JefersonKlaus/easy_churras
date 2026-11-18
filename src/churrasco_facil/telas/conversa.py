@@ -1,4 +1,4 @@
-"""Tela de conversa com o Mestre do Churrasco."""
+"""Aba Mestre: a explicação do plano e as dúvidas, com o Mestre do Churrasco."""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
@@ -6,6 +6,9 @@ from typing import TYPE_CHECKING, Any
 import flet as ft
 
 from ..cliente_groq import ErroGroq
+from ..planejador import montar_plano
+from . import navegacao
+from . import tema as t
 from . import widgets as w
 
 if TYPE_CHECKING:
@@ -16,23 +19,56 @@ SUGESTOES = ("Como sei que a carne está no ponto?", "E se começar a chover?",
 
 
 def _balao(texto: str, do_usuario: bool) -> ft.Control:
-    return ft.Container(content=ft.Text(texto, size=14), padding=10, border_radius=10,
-                        bgcolor="#E7E5E4" if do_usuario else w.FUNDO_CARTAO)
+    return ft.Container(content=ft.Text(texto, size=15, color=t.TEXTO), padding=12,
+                        border_radius=t.RAIO,
+                        bgcolor=t.PRIMARIA_CLARA if do_usuario else t.SUPERFICIE,
+                        border=None if do_usuario else ft.Border.all(1, t.BORDA))
 
 
-def montar(app: AppChurrasco) -> list[ft.Control]:
+def _explicacao(app: AppChurrasco, mensagem: ft.Text) -> ft.Control:
+    """O texto da explicação, ou o botão para pedir uma."""
+    plano = app.plano
+    assert plano is not None
+    if plano.explicacao:
+        return w.cartao([ft.Text(plano.explicacao, size=14)])
+
+    async def pedir(_evento: Any) -> None:
+        if app.ocupado:
+            return
+        app.ocupado, mensagem.value = True, "O Mestre está pensando..."
+        app.atualizar()
+        try:
+            assistente = app.assistente()
+            texto = await assistente.explicar(plano)
+        except (ErroGroq, ValueError) as erro:
+            app.ocupado = False
+            mensagem.value = getattr(erro, "mensagem_usuario", str(erro))
+            app.atualizar()
+            return
+        app.plano = montar_plano(plano.pedido, app.parametros(), app.config.precos, texto)
+        if app.plano_id is not None:
+            app.banco.atualizar_explicacao(app.plano_id, texto)
+        app.ocupado, app.aviso = False, assistente.aviso
+        app.ir_conversa()
+
+    return w.linha_botoes([w.botao_secundario("Explicar o meu plano", pedir,
+                                              ft.Icons.AUTO_AWESOME)])
+
+
+def montar(app: AppChurrasco) -> w.Tela:
     conversa = app.conversa
-    if conversa is None:
-        return [w.titulo("Abra um plano primeiro"),
-                ft.Button("Início", on_click=lambda _e: app.ir_inicio())]
-    cliente_ok = True       # sem chave ou sem internet, o assistente local responde
+    if app.plano is None or conversa is None:
+        return navegacao.sem_plano(app)
+    offline = getattr(conversa, "offline", False)
+    mensagem = ft.Text(app.aviso or ("Modo offline: respondo com dicas prontas de churrasco."
+                                     if offline else ""), size=13, color=t.SECUNDARIO,
+                       text_align=w.CENTRO)
+    app.aviso = ""
     historico = ft.Column(controls=[_balao(m["content"], m["role"] == "user")
                                     for m in conversa.historico], spacing=8)
-    mensagem = ft.Text("Modo offline: respondo com dicas prontas de churrasco."
-                       if getattr(conversa, "offline", False) else "", size=13, color=w.CINZA)
     pergunta = {"texto": ""}
     campo = ft.TextField(label="Sua dúvida", multiline=True, min_lines=1, max_lines=4,
-                         disabled=not cliente_ok,
+                         border_radius=12, text_size=16,
                          on_change=lambda e: pergunta.update(texto=str(e.control.value or "")))
 
     async def enviar_texto(texto: str) -> None:
@@ -69,14 +105,11 @@ def montar(app: AppChurrasco) -> list[ft.Control]:
         conversa.limpar()
         app.ir_conversa()
 
-    return [
-        w.titulo("Mestre do Churrasco"),
-        w.subtitulo("Pergunte o que quiser sobre fogo, ponto da carne e imprevistos. Não "
-                    "escreva nomes nem dados pessoais."),
-        historico, mensagem, campo,
-        w.linha_botoes([ft.Button("Enviar", on_click=enviar, disabled=not cliente_ok)]),
-        w.linha_botoes([ft.OutlinedButton(s, on_click=sugerir(s), disabled=not cliente_ok)
-                        for s in SUGESTOES]),
-        w.linha_botoes([ft.OutlinedButton("Limpar conversa", on_click=limpar),
-                        ft.Button("Voltar ao plano", on_click=lambda _e: app.ir_plano())]),
-    ]
+    return w.Tela([
+        mensagem,
+        _explicacao(app, mensagem),
+        historico, campo,
+        w.linha_botoes([w.botao_principal("Enviar", enviar, ft.Icons.SEND)]),
+        ft.Row(controls=[w.botao_leve(s, sugerir(s)) for s in SUGESTOES], wrap=True),
+        w.botao_leve("Limpar conversa", limpar),
+    ], topo=navegacao.cabecalho(app, navegacao.MESTRE))

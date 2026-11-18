@@ -1,12 +1,11 @@
-"""Leitura e validação do que o usuário digita (datas, horas, valores)."""
+"""Leitura e validação do que o usuário digita (datas e horas)."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from typing import Optional
 
 from .calculadora import Convidados
-from .dinheiro import formatar_reais, reais_para_centavos
 
 
 def ler_data(texto: str, hoje: Optional[date] = None) -> date:
@@ -51,14 +50,6 @@ def ler_hora(texto: str) -> time:
         raise ValueError("escreva a hora assim: 14:00") from None
 
 
-def ler_orcamento(texto: str) -> Optional[int]:
-    """Campo vazio = sem limite. Devolve centavos."""
-    if not texto.strip():
-        return None
-    valor = reais_para_centavos(texto)
-    return valor if valor > 0 else None
-
-
 def combinar(data: date, hora: time) -> datetime:
     return datetime.combine(data, hora)
 
@@ -84,10 +75,8 @@ class Rascunho:
     duracao_horas: int = 4
     data_texto: str = ""
     hora_texto: str = "14:00"
-    orcamento_texto: str = ""
-    nome: str = "Meu churrasco"
-    usar_ia: bool = True
     texto_livre: str = ""
+    secoes_fora: set[str] = field(default_factory=set)   # seções que não entram na conta
 
     def __post_init__(self) -> None:
         if not self.data_texto:
@@ -100,8 +89,7 @@ class Rascunho:
 
     def aplicar_interpretacao(self, adultos: Optional[int], criancas: Optional[int],
                               vegetarianos: Optional[int], bebem_alcool: Optional[int],
-                              duracao_horas: Optional[float],
-                              orcamento_centavos: Optional[int]) -> list[str]:
+                              duracao_horas: Optional[float]) -> list[str]:
         """Copia o que o Groq entendeu. Devolve o que mudou, em texto simples."""
         mudou: list[str] = []
         if adultos is not None:
@@ -118,10 +106,7 @@ class Rascunho:
             mudou.append(f"{bebem_alcool} bebem álcool")
         if duracao_horas is not None:
             self.duracao_horas = max(1, min(12, round(duracao_horas)))
-            mudou.append(f"{self.duracao_horas} horas")
-        if orcamento_centavos:
-            self.orcamento_texto = f"{orcamento_centavos / 100:.2f}".replace(".", ",")
-            mudou.append(f"orçamento {formatar_reais(orcamento_centavos)}")
+            mudou.append(f"festa de {self.duracao_horas} horas")
         self.ajustar_limites()
         return mudou
 

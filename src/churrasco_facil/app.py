@@ -17,7 +17,9 @@ from .configuracao import (Configuracao, carregar_configuracao, cliente_da_confi
 from .conversa import Conversa
 from .entradas import Rascunho
 from .planejador import Plano, montar_plano, resumo_plano
-from .telas import assistente_passos, configuracoes, conversa, cronograma, inicio, lista, plano
+from .telas import (assistente_passos, configuracoes, conversa, cronograma, inicio, lista,
+                    navegacao, plano, tema)
+from .telas.widgets import Tela
 
 logger = logging.getLogger(__name__)
 
@@ -56,11 +58,17 @@ class AppChurrasco:
     def atualizar(self) -> None:
         self.page.update()
 
-    def mostrar(self, controles: list[ft.Control]) -> None:
-        """Troca o conteúdo da página."""
+    def mostrar(self, tela: Tela, aba: Optional[int] = None) -> None:
+        """Troca a tela. O topo e o rodapé da tela ficam fixos; só o conteúdo rola.
+        Nas abas do plano, a barra de abas aparece no rodapé."""
+        com_abas = aba is not None and self.plano is not None
+        self.page.navigation_bar = navegacao.barra(self, aba) if com_abas else None
         self.page.clean()
-        self.page.add(ft.Column(controls=controles, spacing=12, scroll=ft.ScrollMode.AUTO,
-                                expand=True, horizontal_alignment=ft.CrossAxisAlignment.CENTER))
+        self.page.add(*tela.topo,
+                      ft.Column(controls=tela.conteudo, spacing=tema.ESPACO,
+                                scroll=ft.ScrollMode.AUTO, expand=True,
+                                horizontal_alignment=ft.CrossAxisAlignment.STRETCH),
+                      *tela.rodape)
 
     async def copiar(self, texto: str) -> bool:
         """Copia para a área de transferência. A API muda entre versões do Flet: tenta as
@@ -90,13 +98,15 @@ class AppChurrasco:
         self.mostrar(assistente_passos.montar(self, passo))
 
     def ir_plano(self) -> None:
-        self.mostrar(plano.montar(self))
+        self.mostrar(plano.montar(self), navegacao.CARNES)
 
     def ir_lista(self) -> None:
-        self.mostrar(lista.montar(self))
+        self.salvar_plano()
+        self.mostrar(lista.montar(self), navegacao.COMPRAS)
 
     def ir_cronograma(self) -> None:
-        self.mostrar(cronograma.montar(self))
+        self.salvar_plano()
+        self.mostrar(cronograma.montar(self), navegacao.HORARIOS)
 
     def ir_conversa(self) -> None:
         if self.plano is not None and self.conversa is None:
@@ -106,10 +116,18 @@ class AppChurrasco:
                                          ConversaLocal(self.plano))
             else:
                 self.conversa = ConversaLocal(self.plano)
-        self.mostrar(conversa.montar(self))
+        self.mostrar(conversa.montar(self), navegacao.MESTRE)
 
     def ir_configuracoes(self) -> None:
         self.mostrar(configuracoes.montar(self))
+
+    def salvar_plano(self) -> None:
+        """Salva o plano aberto em "Meus churrascos", uma vez só, e avisa na próxima tela.
+        Quem abre as compras ou os horários vai mesmo fazer o churrasco: é a hora de salvar."""
+        if self.plano is None or self.plano_id is not None:
+            return
+        self.plano_id = self.banco.salvar(self.plano.pedido, self.plano.explicacao)
+        self.aviso = "Plano salvo em Meus churrascos."
 
     def abrir_salvo(self, id: int) -> None:
         """Carrega um plano salvo e mostra a tela do plano."""
@@ -124,11 +142,23 @@ class AppChurrasco:
         self.ir_plano()
 
 
+async def travar_em_retrato(page: ft.Page) -> None:
+    """No celular, o app fica sempre em pé (retrato). No computador e na web o Flet não
+    deixa travar: lá a janela já abre em pé (430 x 900)."""
+    plataforma = getattr(page, "platform", None)
+    if plataforma is None or not plataforma.is_mobile():
+        return
+    try:
+        await page.set_allowed_device_orientations([ft.DeviceOrientation.PORTRAIT_UP])
+    except Exception:  # versão do Flet ou aparelho sem suporte: segue sem travar
+        logger.debug("não consegui travar a tela em retrato", exc_info=True)
+
+
 async def main(page: ft.Page) -> None:
     """Ponto de entrada passado para `ft.run`."""
     page.title = "Churrasco Fácil"
-    page.theme_mode = ft.ThemeMode.LIGHT
-    page.padding = 14
+    tema.aplicar(page)
+    await travar_em_retrato(page)
     try:
         page.window.width = 430
         page.window.height = 900

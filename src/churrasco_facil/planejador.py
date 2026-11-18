@@ -5,11 +5,12 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Mapping, Optional
 
-from .calculadora import Convidados, Parametros
+from .calculadora import Convidados, Parametros, itens_para_lembrar
 from .catalogo_carnes import CORTES, MISTURA_VEGETARIANA, VEGETARIANO, Corte
 from .cronograma import Etapa, formatar_hora, gerar_cronograma
 from .dinheiro import formatar_reais
 from .orcamento import ResultadoOrcamento, custo_por_pessoa, planejar_compras
+from .produtos import ItemPlano
 from .seguranca import Aviso, avisos_para
 
 DIAS_DA_SEMANA = ("segunda", "terça", "quarta", "quinta", "sexta", "sábado", "domingo")
@@ -24,6 +25,7 @@ class Pedido:
     orcamento: Optional[int] = None                    # centavos, None = sem limite
     pesos_preferidos: dict[str, int] = field(default_factory=dict)
     nome: str = "Meu churrasco"
+    secoes_fora: tuple[str, ...] = ()                   # seções que não entram na conta
 
 
 @dataclass(frozen=True)
@@ -34,6 +36,7 @@ class Plano:
     cronograma: list[Etapa]
     avisos: list[Aviso]
     explicacao: Optional[str] = None
+    lembretes: list[ItemPlano] = field(default_factory=list)   # fora da conta
 
     @property
     def custo_total(self) -> int:
@@ -57,7 +60,7 @@ def montar_plano(pedido: Pedido, par: Optional[Parametros] = None,
                  explicacao: Optional[str] = None) -> Plano:
     """Calcula compras, cronograma e avisos. Mesmo pedido, mesmo plano, sempre."""
     compras = planejar_compras(pedido.convidados, pedido.orcamento, par, precos,
-                               pedido.pesos_preferidos or None)
+                               pedido.pesos_preferidos or None, pedido.secoes_fora)
     cortes = cortes_do_plano(compras.pesos, pedido.convidados.vegetarianos)
     return Plano(
         pedido=pedido,
@@ -66,6 +69,7 @@ def montar_plano(pedido: Pedido, par: Optional[Parametros] = None,
         cronograma=gerar_cronograma(pedido.hora_servir, cortes),
         avisos=avisos_para(cortes),
         explicacao=explicacao,
+        lembretes=itens_para_lembrar(pedido.convidados, par),
     )
 
 

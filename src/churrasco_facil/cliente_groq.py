@@ -40,7 +40,7 @@ class ErroLimiteUso(ErroGroq):
 
 
 class ErroModelo(ErroGroq):
-    mensagem_usuario = "O modelo do Groq não existe mais. Troque o modelo em Configurações."
+    mensagem_usuario = "O modelo de IA do Groq não está mais disponível. O resto do app funciona."
 
 
 class ErroRede(ErroGroq):

@@ -24,6 +24,9 @@ def texto_lista(plano: Plano) -> str:
     for secao, itens in agrupar_por_secao(plano.compras.itens).items():
         blocos.append(f"\n*{secao}*")
         blocos.extend(f"- {i.produto.nome}: {formatar_quantidade(i)}" for i in itens)
+    if plano.lembretes:
+        blocos.append("\n*Não esqueça*")
+        blocos.extend(f"- {i.produto.nome}: {formatar_quantidade(i)}" for i in plano.lembretes)
     return "\n".join(blocos)
 
 

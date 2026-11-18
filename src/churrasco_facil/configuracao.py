@@ -6,12 +6,13 @@ import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Mapping, Optional
 
 from .calculadora import Parametros
 from .catalogo_carnes import CORTES
 from .catalogo_itens import ITENS
 from .cliente_groq import MODELO_PADRAO, ClienteGroq
+from .dinheiro import reais_para_centavos
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,27 @@ def _precos_limpos(bruto: object) -> dict[str, int]:
     return {k: v for k, v in bruto.items()
             if k in validos and isinstance(v, int) and not isinstance(v, bool)
             and 0 <= v <= PRECO_MAXIMO}
+
+
+def juntar_precos(atuais: Mapping[str, int], digitados: Mapping[str, str]) -> dict[str, int]:
+    """Junta aos preços salvos os que o usuário digitou (em reais), por id do produto.
+
+    Preço igual ao do catálogo não é guardado. Levanta ValueError citando o produto.
+    """
+    novos = dict(atuais)
+    for id, texto in digitados.items():
+        produto = CORTES.get(id) or ITENS[id]
+        try:
+            centavos = reais_para_centavos(texto)
+        except ValueError as erro:
+            raise ValueError(f"{produto.nome}: {erro}") from None
+        if centavos > PRECO_MAXIMO:
+            raise ValueError(f"{produto.nome}: preço alto demais")
+        if centavos == produto.preco:
+            novos.pop(id, None)
+        else:
+            novos[id] = centavos
+    return novos
 
 
 def carregar_configuracao(caminho: Optional[Path] = None) -> Configuracao:

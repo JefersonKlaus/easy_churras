@@ -36,6 +36,14 @@ def linha_do_item(item: ItemPlano, com_preco: bool = True) -> str:
     return texto
 
 
+def texto_dos_lembretes(lembretes: list[ItemPlano]) -> str:
+    """O que não entra na conta, mas não pode ser esquecido. Vazio se não houver nada."""
+    if not lembretes:
+        return ""
+    return "\n".join(["NÃO ESQUEÇA (fora da conta)"]
+                     + [f"- {linha_do_item(i, com_preco=False)}" for i in lembretes])
+
+
 def texto_da_lista(itens: list[ItemPlano], com_preco: bool = True) -> str:
     """A lista inteira em texto simples, uma seção por bloco."""
     blocos = []

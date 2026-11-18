@@ -27,5 +27,5 @@ product = "Churrasco Fácil"
 path = "src"
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = ["src", "tests", "tests/telas"]
 testpaths = ["tests"]

@@ -12,6 +12,7 @@ from .calculadora import Convidados
 from .catalogo_carnes import CORTES
 from .configuracao import pasta_de_dados
 from .planejador import Pedido
+from .produtos import SECOES_OPCIONAIS
 
 NOME_BANCO = "planos.sqlite3"
 VERSAO = 1
@@ -32,6 +33,7 @@ def pedido_para_dict(pedido: Pedido) -> dict[str, Any]:
         "hora_servir": pedido.hora_servir.isoformat(timespec="minutes"),
         "orcamento": pedido.orcamento,
         "pesos_preferidos": pedido.pesos_preferidos,
+        "secoes_fora": list(pedido.secoes_fora),
         "convidados": {"adultos": c.adultos, "criancas": c.criancas,
                        "vegetarianos": c.vegetarianos, "bebem_alcool": c.bebem_alcool,
                        "duracao_horas": c.duracao_horas},
@@ -44,6 +46,7 @@ def pedido_de_dict(dados: dict[str, Any]) -> Pedido:
         conv = dados["convidados"]
         orcamento = dados.get("orcamento")
         pesos = dados.get("pesos_preferidos") or {}
+        fora = dados.get("secoes_fora") or []       # planos antigos não têm este campo
         return Pedido(
             convidados=Convidados(adultos=int(conv["adultos"]), criancas=int(conv["criancas"]),
                                   vegetarianos=int(conv["vegetarianos"]),
@@ -53,6 +56,7 @@ def pedido_de_dict(dados: dict[str, Any]) -> Pedido:
             orcamento=int(orcamento) if orcamento else None,
             pesos_preferidos={k: int(v) for k, v in pesos.items() if k in CORTES},
             nome=str(dados.get("nome") or "Meu churrasco")[:60],
+            secoes_fora=tuple(s for s in SECOES_OPCIONAIS if s in fora),
         )
     except (KeyError, TypeError, AttributeError) as erro:
         raise ValueError(f"registro inválido: {erro}") from None

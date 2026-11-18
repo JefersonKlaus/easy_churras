@@ -2,146 +2,160 @@ import asyncio
 
 import pytest
 
-from churrasco_facil.cliente_groq import (ClienteGroq, ErroAutenticacao, ErroGroq,
-                                          ErroLimiteUso, ErroModelo, ErroRede, ErroResposta,
-                                          ErroSemChave, MODELO_PADRAO, URL_PADRAO)
-from conftest import TransporteFalso, resposta_groq, sem_espera
+from churrasco_facil.cliente_groq import (MODELO_PADRAO, URL_PADRAO, ClienteGroq,
+                                          ErroAutenticacao, ErroGroq, ErroLimiteUso, ErroModelo,
+                                          ErroRede, ErroResposta, ErroSemChave)
+from dubles import CHAVE, DormirFalso, TransporteFalso, cliente_falso, resposta_groq, resposta_ok
 
 MSG = [{"role": "user", "content": "oi"}]
 
 
-def cliente(*respostas, tentativas=3, esperas=None):
-    transporte = TransporteFalso(*respostas)
-
-    async def dormir(segundos):
-        if esperas is not None:
-            esperas.append(segundos)
-
-    return ClienteGroq("chave-secreta", transporte=transporte, tentativas=tentativas,
-                       dormir=dormir), transporte
+def conversar(cliente, **opcoes):
+    return asyncio.run(cliente.conversar(MSG, **opcoes))
 
 
-def conversar(c, **kw):
-    return asyncio.run(c.conversar(MSG, **kw))
+def erro_de(cliente):
+    with pytest.raises(ErroGroq) as excecao:
+        conversar(cliente)
+    return excecao.value
 
 
-def test_resposta_normal_e_o_que_foi_enviado():
-    c, t = cliente((200, {}, resposta_groq("olá")))
-    assert conversar(c, temperatura=0.2, max_tokens=50) == "olá"
-    chamada = t.chamadas[0]
-    assert chamada["url"] == URL_PADRAO
-    assert chamada["cabecalhos"]["Authorization"] == "Bearer chave-secreta"
-    assert chamada["corpo"]["model"] == MODELO_PADRAO
-    assert chamada["corpo"]["messages"] == MSG
-    assert chamada["corpo"]["temperature"] == 0.2
-    assert chamada["corpo"]["max_completion_tokens"] == 50
-    assert "response_format" not in chamada["corpo"]
+# ---------------------------------------------------------------- pedido enviado
+
+def test_devolve_o_texto_da_resposta():
+    cliente, _ = cliente_falso(resposta_ok("olá"))
+    assert conversar(cliente) == "olá"
+
+
+def test_envia_para_a_url_do_groq_com_a_chave():
+    cliente, transporte = cliente_falso(resposta_ok("olá"))
+    conversar(cliente)
+    assert transporte.chamadas[0]["url"] == URL_PADRAO
+    assert transporte.chamadas[0]["cabecalhos"]["Authorization"] == f"Bearer {CHAVE}"
+
+
+@pytest.mark.parametrize("campo, valor", [
+    ("model", MODELO_PADRAO), ("messages", MSG), ("temperature", 0.2),
+    ("max_completion_tokens", 50),
+])
+def test_corpo_leva_modelo_mensagens_e_opcoes(campo, valor):
+    cliente, transporte = cliente_falso(resposta_ok("olá"))
+    conversar(cliente, temperatura=0.2, max_tokens=50)
+    assert transporte.chamadas[0]["corpo"][campo] == valor
+
+
+def test_sem_modo_json_nao_pede_response_format():
+    cliente, transporte = cliente_falso(resposta_ok("olá"))
+    conversar(cliente)
+    assert "response_format" not in transporte.chamadas[0]["corpo"]
 
 
 def test_modo_json_pede_response_format():
-    c, t = cliente((200, {}, resposta_groq("{}")))
-    conversar(c, json_obrigatorio=True)
-    assert t.chamadas[0]["corpo"]["response_format"] == {"type": "json_object"}
+    cliente, transporte = cliente_falso(resposta_ok("{}"))
+    conversar(cliente, json_obrigatorio=True)
+    assert transporte.chamadas[0]["corpo"]["response_format"] == {"type": "json_object"}
 
 
-def test_sem_chave_nem_chega_a_chamar_a_rede():
-    t = TransporteFalso((200, {}, resposta_groq("x")))
-    for chave in (None, "", "   "):
-        with pytest.raises(ErroSemChave):
-            asyncio.run(ClienteGroq(chave, transporte=t).conversar(MSG))
-    assert t.chamadas == []
+@pytest.mark.parametrize("chave", [None, "", "   "])
+def test_sem_chave_nem_chega_a_chamar_a_rede(chave):
+    transporte = TransporteFalso(resposta_ok("x"))
+    with pytest.raises(ErroSemChave):
+        conversar(ClienteGroq(chave, transporte=transporte))
+    assert transporte.chamadas == []
 
 
-def test_limite_de_uso_espera_o_que_o_groq_pediu_e_tenta_de_novo():
-    esperas = []
-    c, t = cliente((429, {"retry-after": "2"}, ""), (429, {"retry-after": "3"}, ""),
-                   (200, {}, resposta_groq("ok")), esperas=esperas)
-    assert conversar(c) == "ok"
-    assert esperas == [2.0, 3.0] and len(t.chamadas) == 3
+# ---------------------------------------------------------------- novas tentativas
+
+def test_limite_de_uso_espera_o_que_o_groq_pediu():
+    dormir = DormirFalso()
+    cliente, _ = cliente_falso((429, {"retry-after": "2"}, ""), (429, {"retry-after": "3"}, ""),
+                               resposta_ok("ok"), dormir=dormir)
+    assert conversar(cliente) == "ok"
+    assert dormir.esperas == [2.0, 3.0]
 
 
-def test_espera_exponencial_sem_retry_after_e_limite_maximo():
-    esperas = []
-    c, _ = cliente((503, {}, ""), (503, {}, ""), (200, {}, resposta_groq("ok")),
-                   esperas=esperas)
-    assert conversar(c) == "ok" and esperas == [1.0, 2.0]
-    esperas.clear()
-    c, _ = cliente((429, {"retry-after": "999"}, ""), (200, {}, resposta_groq("ok")),
-                   esperas=esperas)
-    assert conversar(c) == "ok" and esperas == [20.0]
+def test_sem_retry_after_a_espera_dobra():
+    dormir = DormirFalso()
+    cliente, _ = cliente_falso((503, {}, ""), (503, {}, ""), resposta_ok("ok"), dormir=dormir)
+    conversar(cliente)
+    assert dormir.esperas == [1.0, 2.0]
+
+
+def test_espera_tem_limite_maximo():
+    dormir = DormirFalso()
+    cliente, _ = cliente_falso((429, {"retry-after": "999"}, ""), resposta_ok("ok"), dormir=dormir)
+    conversar(cliente)
+    assert dormir.esperas == [20.0]
+
+
+def test_falha_de_rede_passageira_tenta_de_novo():
+    cliente, _ = cliente_falso(OSError("sem rede"), resposta_ok("voltou"))
+    assert conversar(cliente) == "voltou"
+
+
+def test_falha_de_rede_persistente_desiste_depois_das_tentativas():
+    cliente, transporte = cliente_falso(OSError("sem rede"), tentativas=3)
+    assert isinstance(erro_de(cliente), ErroRede)
+    assert len(transporte.chamadas) == 3
 
 
 def test_limite_de_uso_persistente_vira_erro_de_limite():
-    c, t = cliente((429, {}, ""), tentativas=2)
-    with pytest.raises(ErroLimiteUso):
-        conversar(c)
-    assert len(t.chamadas) == 2
+    cliente, transporte = cliente_falso((429, {}, ""), tentativas=2)
+    assert isinstance(erro_de(cliente), ErroLimiteUso)
+    assert len(transporte.chamadas) == 2
 
 
-def test_erro_de_servidor_persistente_vira_erro_groq():
-    c, _ = cliente((500, {}, ""), tentativas=2)
-    with pytest.raises(ErroGroq) as excecao:
-        conversar(c)
-    assert "500" in str(excecao.value)
+def test_erro_de_servidor_persistente_cita_o_codigo():
+    cliente, _ = cliente_falso((500, {}, ""), tentativas=2)
+    assert "500" in str(erro_de(cliente))
 
 
-def test_falha_de_rede_tenta_de_novo_e_depois_desiste():
-    c, t = cliente(OSError("sem rede"), tentativas=3)
-    with pytest.raises(ErroRede):
-        conversar(c)
-    assert len(t.chamadas) == 3
-    c, _ = cliente(OSError("sem rede"), (200, {}, resposta_groq("voltou")))
-    assert conversar(c) == "voltou"
+def test_tentativas_minimas_sao_uma():
+    assert ClienteGroq("k", tentativas=0).tentativas == 1
 
 
-@pytest.mark.parametrize("codigo", [401, 403])
-def test_chave_recusada_nao_repete(codigo):
-    c, t = cliente((codigo, {}, "no"))
-    with pytest.raises(ErroAutenticacao):
-        conversar(c)
-    assert len(t.chamadas) == 1
+# ---------------------------------------------------------------- erros que não repetem
 
-
-def test_modelo_inexistente():
-    for resposta in ((404, {}, ""), (400, {}, '{"error": "The model `x` does not exist"}')):
-        c, t = cliente(resposta)
-        with pytest.raises(ErroModelo):
-            conversar(c)
-        assert len(t.chamadas) == 1
-
-
-def test_outros_erros_do_cliente_nao_repetem():
-    c, t = cliente((422, {}, "invalido"))
-    with pytest.raises(ErroResposta):
-        conversar(c)
-    assert len(t.chamadas) == 1
+@pytest.mark.parametrize("resposta, tipo", [
+    ((401, {}, "no"), ErroAutenticacao), ((403, {}, "no"), ErroAutenticacao),
+    ((404, {}, ""), ErroModelo),
+    ((400, {}, '{"error": "The model `x` does not exist"}'), ErroModelo),
+    ((422, {}, "invalido"), ErroResposta),
+])
+def test_erro_do_cliente_nao_repete(resposta, tipo):
+    cliente, transporte = cliente_falso(resposta)
+    assert isinstance(erro_de(cliente), tipo)
+    assert len(transporte.chamadas) == 1
 
 
 @pytest.mark.parametrize("corpo", ["não é json", "{}", '{"choices": []}',
                                    resposta_groq(""), resposta_groq("   "),
                                    '{"choices": [{"message": {"content": 5}}]}'])
-def test_respostas_mal_formadas(corpo):
-    c, _ = cliente((200, {}, corpo))
-    with pytest.raises(ErroResposta):
-        conversar(c)
+def test_resposta_mal_formada_vira_erro_de_resposta(corpo):
+    cliente, _ = cliente_falso((200, {}, corpo))
+    assert isinstance(erro_de(cliente), ErroResposta)
 
 
-def test_chave_nunca_aparece_nas_mensagens_de_erro():
-    for resposta in ((401, {}, "chave-secreta"), (500, {}, "chave-secreta"),
-                     (404, {}, "chave-secreta"), OSError("chave-secreta")):
-        c, _ = cliente(resposta, tentativas=1)
-        with pytest.raises(ErroGroq) as excecao:
-            conversar(c)
-        assert "chave-secreta" not in str(excecao.value)
-        assert "chave-secreta" not in excecao.value.mensagem_usuario
+# ---------------------------------------------------------------- mensagens de erro
+
+@pytest.mark.parametrize("resposta", [(401, {}, CHAVE), (500, {}, CHAVE), (404, {}, CHAVE),
+                                      OSError(CHAVE)])
+def test_chave_nunca_aparece_no_erro(resposta):
+    erro = erro_de(cliente_falso(resposta, tentativas=1)[0])
+    assert CHAVE not in str(erro) and CHAVE not in erro.mensagem_usuario
 
 
-def test_cada_erro_tem_mensagem_para_o_usuario_em_portugues():
-    for tipo in (ErroSemChave, ErroAutenticacao, ErroLimiteUso, ErroModelo, ErroRede,
-                 ErroResposta, ErroGroq):
-        assert tipo().mensagem_usuario and tipo().mensagem_usuario[0].isupper()
+@pytest.mark.parametrize("tipo", [ErroSemChave, ErroAutenticacao, ErroLimiteUso, ErroModelo,
+                                  ErroRede, ErroResposta, ErroGroq])
+def test_cada_erro_tem_mensagem_para_o_usuario(tipo):
+    assert tipo().mensagem_usuario[0].isupper()
 
 
-def test_tentativas_minimas():
-    assert ClienteGroq("k", tentativas=0).tentativas == 1
-    assert ClienteGroq(" k ").chave == "k" and ClienteGroq(" k ").configurado
+# ---------------------------------------------------------------- chave
+
+def test_chave_e_aparada():
+    assert ClienteGroq(" k ").chave == "k"
+
+
+def test_cliente_com_chave_fica_configurado():
+    assert ClienteGroq("k").configurado

@@ -31,6 +31,11 @@ def formatar_reais(centavos: int) -> str:
     return f"{sinal}R$ {reais:,}".replace(",", ".") + f",{resto:02d}"
 
 
+def valor_para_campo(centavos: int) -> str:
+    """12345 -> '123,45': o valor como a pessoa digitaria num campo de texto."""
+    return f"{centavos / 100:.2f}".replace(".", ",")
+
+
 def dividir_centavos(total: int, partes: int) -> list[int]:
     """Divide sem perder centavo: as primeiras pessoas ficam com o centavo que sobra."""
     if partes < 1:

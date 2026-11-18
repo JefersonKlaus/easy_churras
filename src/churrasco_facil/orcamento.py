@@ -6,7 +6,7 @@ mais baratos do catálogo (picanha -> maminha -> alcatra...) até caber ou acaba
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Mapping, Optional
+from typing import Collection, Mapping, Optional
 
 from .calculadora import Convidados, Parametros, montar_itens
 from .catalogo_carnes import CORTES, MISTURAS, ORDEM_MISTURAS, pesos_validos
@@ -32,8 +32,9 @@ def custo_total(itens: list[ItemPlano]) -> int:
 
 
 def _custo_com_pesos(conv: Convidados, pesos: Mapping[str, int], par: Parametros,
-                     precos: Optional[Mapping[str, int]]) -> tuple[list[ItemPlano], int]:
-    itens = montar_itens(conv, pesos, par, precos)
+                     precos: Optional[Mapping[str, int]], secoes_fora: Collection[str] = ()
+                     ) -> tuple[list[ItemPlano], int]:
+    itens = montar_itens(conv, pesos, par, precos, secoes_fora)
     return itens, custo_total(itens)
 
 
@@ -60,14 +61,15 @@ def _trocar(pesos: Mapping[str, int], saiu: str, entrou: str) -> dict[str, int]:
 
 def ajustar_ao_orcamento(conv: Convidados, pesos: Mapping[str, int], orcamento: int,
                          par: Optional[Parametros] = None,
-                         precos: Optional[Mapping[str, int]] = None
+                         precos: Optional[Mapping[str, int]] = None,
+                         secoes_fora: Collection[str] = ()
                          ) -> tuple[dict[str, int], list[tuple[str, str]]]:
     """Troca cortes caros por mais baratos até o plano caber. Devolve (pesos, trocas)."""
     par = par or Parametros()
     atuais = dict(pesos)
     trocas: list[tuple[str, str]] = []
     while True:
-        _, custo = _custo_com_pesos(conv, atuais, par, precos)
+        _, custo = _custo_com_pesos(conv, atuais, par, precos, secoes_fora)
         if custo <= orcamento:
             break
         troca = _proxima_troca(atuais, precos)
@@ -81,13 +83,15 @@ def ajustar_ao_orcamento(conv: Convidados, pesos: Mapping[str, int], orcamento: 
 def planejar_compras(conv: Convidados, orcamento: Optional[int] = None,
                      par: Optional[Parametros] = None,
                      precos: Optional[Mapping[str, int]] = None,
-                     pesos_preferidos: Optional[Mapping[str, int]] = None
+                     pesos_preferidos: Optional[Mapping[str, int]] = None,
+                     secoes_fora: Collection[str] = ()
                      ) -> ResultadoOrcamento:
     """Escolhe os cortes e monta os itens.
 
     - Com `pesos_preferidos` (por exemplo, sugeridos pelo Groq) parte deles.
     - Sem eles, usa a mistura mais rica que couber no orçamento.
     - Sem orçamento (None ou 0), usa a mistura tradicional.
+    - Os itens das `secoes_fora` não entram na conta.
     """
     par = par or Parametros()
     limite = orcamento if orcamento else None
@@ -100,14 +104,14 @@ def planejar_compras(conv: Convidados, orcamento: Optional[int] = None,
     else:
         nome, pesos = ORDEM_MISTURAS[-1], dict(MISTURAS[ORDEM_MISTURAS[-1]])
         for candidata in ORDEM_MISTURAS:
-            _, custo = _custo_com_pesos(conv, MISTURAS[candidata], par, precos)
+            _, custo = _custo_com_pesos(conv, MISTURAS[candidata], par, precos, secoes_fora)
             if custo <= limite:
                 nome, pesos = candidata, dict(MISTURAS[candidata])
                 break
     trocas: list[tuple[str, str]] = []
     if limite is not None:
-        pesos, trocas = ajustar_ao_orcamento(conv, pesos, limite, par, precos)
-    itens, total = _custo_com_pesos(conv, pesos, par, precos)
+        pesos, trocas = ajustar_ao_orcamento(conv, pesos, limite, par, precos, secoes_fora)
+    itens, total = _custo_com_pesos(conv, pesos, par, precos, secoes_fora)
     excedente = max(0, total - limite) if limite is not None else 0
     return ResultadoOrcamento(nome, pesos, itens, total, limite, excedente > 0, excedente,
                               trocas)

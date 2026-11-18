@@ -1,4 +1,4 @@
-"""Tela inicial: planos salvos e atalhos."""
+"""Tela inicial: começar um churrasco novo ou abrir um salvo."""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Callable
@@ -25,38 +25,27 @@ def _excluir(app: AppChurrasco, id: int) -> Callable[[Any], None]:
     return tratador
 
 
-def _novo(app: AppChurrasco) -> Callable[[Any], None]:
-    def tratador(_evento: Any) -> None:
-        app.ir_assistente(0)
-    return tratador
-
-
-def _configurar(app: AppChurrasco) -> Callable[[Any], None]:
-    def tratador(_evento: Any) -> None:
-        app.ir_configuracoes()
-    return tratador
-
-
-def montar(app: AppChurrasco) -> list[ft.Control]:
-    ia_ligada = app.cliente().configurado
+def montar(app: AppChurrasco) -> w.Tela:
+    configurar = w.botao_icone(ft.Icons.SETTINGS, "Configurações",
+                               lambda _e: app.ir_configuracoes())
     controles: list[ft.Control] = [
-        w.titulo("Churrasco Fácil"),
-        w.subtitulo("Seu primeiro churrasco sem sufoco: quanto comprar, quanto custa e a que "
-                    "horas fazer cada coisa."),
-        ft.Button("Planejar um churrasco", on_click=_novo(app)),
-        ft.Text("IA conectada: o Mestre do Churrasco pode ajudar." if ia_ligada else
-                "Modo offline: o app planeja e responde dúvidas sem internet. Para ligar a "
-                "IA, coloque a chave do Groq em Configurações.", size=13, color=w.VERDE if ia_ligada else w.CINZA),
+        w.cabecalho("Churrasco Fácil", "Seu primeiro churrasco sem sufoco: quanto comprar, "
+                    "quanto custa e a que horas fazer cada coisa.", direita=configurar),
+        w.linha_botoes([w.botao_principal("Planejar um churrasco",
+                                          lambda _e: app.ir_assistente(0),
+                                          ft.Icons.OUTDOOR_GRILL)]),
     ]
     salvos = app.banco.listar()
     if salvos:
-        controles.append(w.secao("Planos salvos"))
+        controles.append(w.secao("Meus churrascos"))
     for salvo in salvos:
         controles.append(w.cartao([
-            ft.Text(salvo.nome, size=16, weight=ft.FontWeight.BOLD),
-            ft.Text(descrever_data(salvo.hora_servir), size=13, color=w.CINZA),
-            w.linha_botoes([ft.Button("Abrir", on_click=_abrir(app, salvo.id)),
-                            ft.OutlinedButton("Excluir", on_click=_excluir(app, salvo.id))]),
+            ft.Row(controls=[
+                ft.Column(controls=[ft.Text(salvo.nome, size=17, weight=ft.FontWeight.W_600),
+                                    w.dica(descrever_data(salvo.hora_servir))],
+                          spacing=2, expand=True),
+                w.botao_icone(ft.Icons.DELETE_OUTLINE, "Excluir", _excluir(app, salvo.id)),
+            ]),
+            w.linha_botoes([w.botao_secundario("Abrir", _abrir(app, salvo.id))]),
         ]))
-    controles.append(ft.OutlinedButton("Configurações", on_click=_configurar(app)))
-    return controles
+    return w.Tela(controles)

@@ -6,11 +6,11 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, fields, replace
-from typing import Any, Mapping, Optional
+from typing import Any, Collection, Mapping, Optional
 
 from .catalogo_carnes import CORTES, MISTURA_VEGETARIANA, obter_corte
 from .catalogo_itens import obter_item
-from .produtos import ItemPlano
+from .produtos import SECOES_LEMBRETE, ItemPlano
 
 MAX_PESSOAS = 200
 
@@ -196,29 +196,54 @@ def itens_bebidas(conv: Convidados, par: Parametros,
 def itens_carvao_e_extras(conv: Convidados, total_grelha_g: int, par: Parametros,
                           precos: Optional[Mapping[str, int]] = None) -> list[ItemPlano]:
     kg_carvao = max(1.0, total_grelha_g / 1000 * par.carvao_kg_por_kg_de_carne)
-    n = conv.pessoas
     candidatos = [
         _item("carvao_3kg", teto_divisao(kg_carvao, 3), "cerca de 1 kg por kg de carne",
               precos),
         _item("acendedor", 1, "nunca use álcool ou gasolina", precos),
         _item("sal_grosso", 1, "uns 10 g por kg de carne", precos),
         _item("papel_aluminio", 1, "para embrulhar e proteger", precos),
-        _item("copos", teto_divisao(n * par.copos_por_pessoa, 50), "", precos),
-        _item("guardanapos", teto_divisao(n * par.guardanapos_por_pessoa, 50), "", precos),
-        _item("pratos", teto_divisao(n * par.pratos_por_pessoa, 10), "", precos),
     ]
     return [i for i in candidatos if i is not None]
 
 
+def itens_descartaveis(conv: Convidados, par: Optional[Parametros] = None) -> list[ItemPlano]:
+    """Copos, guardanapos e pratos. São só um lembrete: não entram na conta."""
+    par = par or Parametros()
+    n = conv.pessoas
+    candidatos = [
+        _item("copos", teto_divisao(n * par.copos_por_pessoa, 50), "", None),
+        _item("guardanapos", teto_divisao(n * par.guardanapos_por_pessoa, 50), "", None),
+        _item("pratos", teto_divisao(n * par.pratos_por_pessoa, 10), "", None),
+    ]
+    return [i for i in candidatos if i is not None]
+
+
+def _fora_da_grelha(conv: Convidados, grelha_g: int, par: Parametros,
+                    precos: Optional[Mapping[str, int]]) -> list[ItemPlano]:
+    """Tudo o que não vai para a grelha: acompanhamentos, bebidas, carvão e descartáveis."""
+    return (itens_acompanhamentos(conv, par, precos) + itens_bebidas(conv, par, precos)
+            + itens_carvao_e_extras(conv, grelha_g, par, precos)
+            + itens_descartaveis(conv, par))
+
+
 def montar_itens(conv: Convidados, pesos_carne: Mapping[str, int],
                  par: Optional[Parametros] = None,
-                 precos: Optional[Mapping[str, int]] = None) -> list[ItemPlano]:
-    """Todos os itens do churrasco, prontos para virar lista de compras."""
+                 precos: Optional[Mapping[str, int]] = None,
+                 secoes_fora: Collection[str] = ()) -> list[ItemPlano]:
+    """Os itens que entram na conta. A grelha vai sempre; dos outros itens, ficam de fora
+    os das `secoes_fora` (escolha da pessoa) e os que são só lembrete (SECOES_LEMBRETE)."""
     par = par or Parametros()
     pesos = {i: p for i, p in pesos_carne.items() if i in CORTES}
     carnes = itens_de_carne(conv, pesos, par, precos)
     vegetarianos = itens_vegetarianos(conv, par, precos)
     grelha_g = sum(i.quantidade for i in carnes + vegetarianos)
-    return (carnes + vegetarianos + itens_acompanhamentos(conv, par, precos)
-            + itens_bebidas(conv, par, precos)
-            + itens_carvao_e_extras(conv, grelha_g, par, precos))
+    fora = set(secoes_fora) | set(SECOES_LEMBRETE)
+    return carnes + vegetarianos + [i for i in _fora_da_grelha(conv, grelha_g, par, precos)
+                                    if i.produto.secao not in fora]
+
+
+def itens_para_lembrar(conv: Convidados, par: Optional[Parametros] = None) -> list[ItemPlano]:
+    """Mercearia e descartáveis: vão para o "não esqueça", sem entrar na conta."""
+    par = par or Parametros()
+    return [i for i in _fora_da_grelha(conv, 0, par, None)
+            if i.produto.secao in SECOES_LEMBRETE]

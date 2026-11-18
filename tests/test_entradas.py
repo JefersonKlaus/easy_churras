@@ -3,10 +3,19 @@ from datetime import date, datetime, time
 import pytest
 
 from churrasco_facil.entradas import (Rascunho, combinar, formatar_data, ler_data, ler_hora,
-                                      ler_orcamento, proximo_sabado)
+                                      proximo_sabado)
 
 HOJE = date(2026, 11, 17)   # uma terça-feira
+AGORA = datetime(2026, 11, 17, 10, 0)
+NADA = dict(adultos=None, criancas=None, vegetarianos=None, bebem_alcool=None,
+            duracao_horas=None)
 
+
+def interpretar(rascunho, **valores):
+    return rascunho.aplicar_interpretacao(**{**NADA, **valores})
+
+
+# ---------------------------------------------------------------- leitura dos campos
 
 @pytest.mark.parametrize("texto, esperado", [
     ("21/11/2026", date(2026, 11, 21)), ("21-11-2026", date(2026, 11, 21)),
@@ -19,7 +28,7 @@ def test_ler_data(texto, esperado):
 
 
 @pytest.mark.parametrize("texto", ["", "abc", "31/02/2026", "1/2/3/4", "32/1/2026", "10/13/2026"])
-def test_data_invalida(texto):
+def test_ler_data_recusa_data_invalida(texto):
     with pytest.raises(ValueError):
         ler_data(texto, HOJE)
 
@@ -33,59 +42,93 @@ def test_ler_hora(texto, esperado):
 
 
 @pytest.mark.parametrize("texto", ["", "abc", "25:00", "14:60", "1:2:3", "-1"])
-def test_hora_invalida(texto):
+def test_ler_hora_recusa_hora_invalida(texto):
     with pytest.raises(ValueError):
         ler_hora(texto)
 
 
-def test_orcamento():
-    assert ler_orcamento("") is None and ler_orcamento("   ") is None
-    assert ler_orcamento("0") is None
-    assert ler_orcamento("R$ 450,50") == 45050
-    with pytest.raises(ValueError):
-        ler_orcamento("muito")
+@pytest.mark.parametrize("hoje, sabado", [
+    (date(2026, 11, 17), date(2026, 11, 21)),       # terça
+    (date(2026, 11, 21), date(2026, 11, 21)),       # o próprio sábado
+    (date(2026, 11, 22), date(2026, 11, 28)),       # domingo
+])
+def test_proximo_sabado(hoje, sabado):
+    assert proximo_sabado(hoje) == sabado
 
 
-def test_proximo_sabado():
-    assert proximo_sabado(date(2026, 11, 17)) == date(2026, 11, 21)
-    assert proximo_sabado(date(2026, 11, 21)) == date(2026, 11, 21)
-    assert proximo_sabado(date(2026, 11, 22)) == date(2026, 11, 28)
+def test_formatar_data():
     assert formatar_data(date(2026, 11, 5)) == "05/11/2026"
+
+
+def test_combinar_data_e_hora():
     assert combinar(date(2026, 11, 21), time(14, 0)) == datetime(2026, 11, 21, 14, 0)
 
 
-def test_rascunho_padrao_e_limites():
+# ---------------------------------------------------------------- Rascunho
+
+def test_rascunho_comeca_no_proximo_sabado_as_14h():
     r = Rascunho()
-    assert r.data_texto and r.hora_texto == "14:00"
-    r.adultos, r.vegetarianos, r.bebem_alcool = 2, 5, 9
+    assert (r.data_texto, r.hora_texto) == (formatar_data(proximo_sabado()), "14:00")
+
+
+def test_ajustar_limites_mantem_vegetarianos_e_quem_bebe_entre_os_adultos():
+    r = Rascunho(adultos=2, vegetarianos=5, bebem_alcool=9)
     r.ajustar_limites()
     assert (r.vegetarianos, r.bebem_alcool) == (2, 2)
 
 
-def test_rascunho_vira_convidados_e_valida():
-    r = Rascunho(adultos=4, criancas=1, vegetarianos=1, bebem_alcool=2, duracao_horas=5)
-    c = r.para_convidados()
+def test_rascunho_vira_convidados():
+    c = Rascunho(adultos=4, criancas=1, vegetarianos=1, bebem_alcool=2,
+                 duracao_horas=5).para_convidados()
     assert (c.adultos, c.criancas, c.vegetarianos, c.bebem_alcool, c.duracao_horas) == \
         (4, 1, 1, 2, 5.0)
-    r.adultos, r.criancas = 0, 0
+
+
+def test_rascunho_sem_ninguem_nao_vira_convidados():
     with pytest.raises(ValueError):
-        r.para_convidados()
+        Rascunho(adultos=0, criancas=0).para_convidados()
+
+
+def test_data_hora_no_futuro_e_aceita():
+    r = Rascunho(data_texto="17/11/2026", hora_texto="18:30")
+    assert r.para_data_hora(AGORA) == datetime(2026, 11, 17, 18, 30)
 
 
 def test_data_hora_no_passado_e_recusada():
-    agora = datetime(2026, 11, 17, 10, 0)
     r = Rascunho(data_texto="17/11/2026", hora_texto="09:00")
     with pytest.raises(ValueError):
-        r.para_data_hora(agora)
-    r.hora_texto = "18:30"
-    assert r.para_data_hora(agora) == datetime(2026, 11, 17, 18, 30)
+        r.para_data_hora(AGORA)
 
 
 def test_aplicar_interpretacao_so_muda_o_que_veio():
-    r = Rascunho(adultos=8, criancas=2, vegetarianos=0, bebem_alcool=4)
-    mudou = r.aplicar_interpretacao(12, None, 20, None, 4.4, 40000)
-    assert r.adultos == 12 and r.criancas == 2 and r.bebem_alcool == 4
-    assert r.vegetarianos == 12                      # limitado ao número de adultos
-    assert r.duracao_horas == 4 and r.orcamento_texto == "400,00"
-    assert "12 adultos" in mudou and "orçamento R$ 400,00" in mudou
-    assert Rascunho().aplicar_interpretacao(None, None, None, None, None, None) == []
+    r = Rascunho(adultos=8, criancas=2, bebem_alcool=4)
+    interpretar(r, adultos=12)
+    assert (r.adultos, r.criancas, r.bebem_alcool) == (12, 2, 4)
+
+
+def test_aplicar_interpretacao_respeita_os_limites_dos_adultos():
+    r = Rascunho(adultos=8)
+    interpretar(r, vegetarianos=20)
+    assert r.vegetarianos == 8
+
+
+def test_aplicar_interpretacao_arredonda_a_duracao():
+    r = Rascunho()
+    interpretar(r, duracao_horas=4.4)
+    assert r.duracao_horas == 4
+
+
+def test_aplicar_interpretacao_descreve_o_que_mudou():
+    assert interpretar(Rascunho(), adultos=12, criancas=3) == ["12 adultos", "3 crianças"]
+
+
+def test_aplicar_interpretacao_descreve_a_duracao_como_tempo_de_festa():
+    assert interpretar(Rascunho(), duracao_horas=5) == ["festa de 5 horas"]
+
+
+def test_aplicar_interpretacao_vazia_nao_muda_nada():
+    assert interpretar(Rascunho()) == []
+
+
+def test_rascunho_comeca_com_tudo_na_conta():
+    assert Rascunho().secoes_fora == set()
