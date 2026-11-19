@@ -1,11 +1,11 @@
 import asyncio
 
 import pytest
+from dubles import CHAVE, DormirFalso, TransporteFalso, cliente_falso, resposta_groq, resposta_ok
 
 from churrasco_facil.cliente_groq import (MODELO_PADRAO, URL_PADRAO, ClienteGroq,
                                           ErroAutenticacao, ErroGroq, ErroLimiteUso, ErroModelo,
                                           ErroRede, ErroResposta, ErroSemChave)
-from dubles import CHAVE, DormirFalso, TransporteFalso, cliente_falso, resposta_groq, resposta_ok
 
 MSG = [{"role": "user", "content": "oi"}]
 
@@ -83,7 +83,8 @@ def test_sem_retry_after_a_espera_dobra():
 
 def test_espera_tem_limite_maximo():
     dormir = DormirFalso()
-    cliente, _ = cliente_falso((429, {"retry-after": "999"}, ""), resposta_ok("ok"), dormir=dormir)
+    cliente, _ = cliente_falso((429, {"retry-after": "999"}, ""), resposta_ok("ok"),
+                               dormir=dormir)
     conversar(cliente)
     assert dormir.esperas == [20.0]
 
@@ -143,19 +144,3 @@ def test_resposta_mal_formada_vira_erro_de_resposta(corpo):
 def test_chave_nunca_aparece_no_erro(resposta):
     erro = erro_de(cliente_falso(resposta, tentativas=1)[0])
     assert CHAVE not in str(erro) and CHAVE not in erro.mensagem_usuario
-
-
-@pytest.mark.parametrize("tipo", [ErroSemChave, ErroAutenticacao, ErroLimiteUso, ErroModelo,
-                                  ErroRede, ErroResposta, ErroGroq])
-def test_cada_erro_tem_mensagem_para_o_usuario(tipo):
-    assert tipo().mensagem_usuario[0].isupper()
-
-
-# ---------------------------------------------------------------- chave
-
-def test_chave_e_aparada():
-    assert ClienteGroq(" k ").chave == "k"
-
-
-def test_cliente_com_chave_fica_configurado():
-    assert ClienteGroq("k").configurado

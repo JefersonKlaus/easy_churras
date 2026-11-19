@@ -1,16 +1,13 @@
 import asyncio
 
 import pytest
-
-from churrasco_facil.assistente import Assistente, pesos_das_sugestoes
-from churrasco_facil.catalogo_carnes import CORTES
-from churrasco_facil.cliente_groq import ErroGroq, ErroResposta
-from churrasco_facil.esquemas import Sugestao
-from churrasco_facil.planejador import resumo_pedido, resumo_plano
-from churrasco_facil.prompts import mensagens_cortes, mensagens_explicacao, mensagens_pedido
 from dubles import cliente_falso, resposta_ok
 
-PEDIDO = '{"adultos": 12, "criancas": 3, "orcamento_reais": 400}'
+from churrasco_facil.assistente import Assistente
+from churrasco_facil.cliente_groq import ErroGroq, ErroResposta
+from churrasco_facil.prompts import mensagens_pedido
+
+PEDIDO = '{"adultos": 12, "criancas": 3}'
 CORTES_OK = '{"cortes": [{"id": "alcatra", "motivo": "fácil"}, {"id": "zebra"}]}'
 
 
@@ -25,7 +22,7 @@ def assistente(*textos):
 def test_interpretar_pedido_devolve_o_pedido_validado():
     a, _ = assistente(PEDIDO)
     pedido = asyncio.run(a.interpretar_pedido("12 adultos"))
-    assert (pedido.adultos, pedido.orcamento_centavos) == (12, 40000)
+    assert (pedido.adultos, pedido.criancas) == (12, 3)
 
 
 def test_interpretar_pedido_envia_as_mensagens_de_pedido():
@@ -69,36 +66,5 @@ def test_erro_do_groq_passa_direto_para_quem_chamou():
 
 # ---------------------------------------------------------------- sugerir_cortes
 
-def test_sugerir_cortes_so_aceita_ids_do_catalogo(convidados):
-    a, _ = assistente(CORTES_OK)
-    assert [s.id for s in asyncio.run(a.sugerir_cortes(convidados, 40000))] == ["alcatra"]
-
-
-def test_sugerir_cortes_envia_o_resumo_do_grupo(convidados):
-    a, t = assistente(CORTES_OK)
-    asyncio.run(a.sugerir_cortes(convidados, 40000))
-    assert t.mensagens == mensagens_cortes(resumo_pedido(convidados, 40000))
-
-
-def test_pesos_das_sugestoes_usam_o_peso_padrao_e_ignoram_ids_desconhecidos():
-    sugestoes = [Sugestao("picanha", ""), Sugestao("zebra", "")]
-    assert pesos_das_sugestoes(sugestoes) == {"picanha": CORTES["picanha"].peso_padrao}
-
 
 # ---------------------------------------------------------------- explicar
-
-def test_explicar_devolve_o_texto_limpo(plano):
-    a, _ = assistente("Ótima escolha! ```ignorar``` Boa festa.")
-    assert asyncio.run(a.explicar(plano)) == "Ótima escolha!  Boa festa."
-
-
-def test_explicar_envia_o_resumo_do_plano(plano):
-    a, t = assistente("Boa festa.")
-    asyncio.run(a.explicar(plano))
-    assert t.mensagens == mensagens_explicacao(resumo_plano(plano))
-
-
-def test_explicacao_so_com_codigo_e_erro(plano):
-    a, _ = assistente("```só código```")
-    with pytest.raises(ErroResposta):
-        asyncio.run(a.explicar(plano))

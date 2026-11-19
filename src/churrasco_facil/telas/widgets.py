@@ -26,8 +26,9 @@ class Tela:
 CENTRO = ft.TextAlign.CENTER
 
 
-def titulo(texto: str) -> ft.Text:
-    return ft.Text(texto, size=26, weight=ft.FontWeight.W_700, color=t.TEXTO, text_align=CENTRO)
+def titulo(texto: str, tamanho: int = 26) -> ft.Text:
+    return ft.Text(texto, size=tamanho, weight=ft.FontWeight.W_700, color=t.TEXTO,
+                   text_align=CENTRO)
 
 
 def subtitulo(texto: str) -> ft.Text:
@@ -70,11 +71,6 @@ def botao_secundario(texto: str, on_click: Callable[[Any], Any],
                              expand=True, style=_estilo_botao())
 
 
-def botao_leve(texto: str, on_click: Callable[[Any], Any]) -> ft.TextButton:
-    """Ação pequena, sem destaque (sugestões, limpar)."""
-    return ft.TextButton(texto, on_click=on_click)
-
-
 def botao_icone(icone: str, dica_: str, on_click: Callable[[Any], Any]) -> ft.IconButton:
     """Ícone que faz uma ação. A `dica_` aparece ao segurar e é lida por leitores de tela."""
     return ft.IconButton(icon=icone, tooltip=dica_, on_click=on_click, icon_size=26,
@@ -103,39 +99,48 @@ def cartao(controles: list[ft.Control], fundo: str = t.SUPERFICIE, borda: str = 
 
 
 def cabecalho(titulo_: str, subtitulo_: str = "", esquerda: Optional[ft.Control] = None,
-              direita: Optional[ft.Control] = None) -> ft.Row:
-    """Título centralizado, com um ícone opcional de cada lado (ex.: voltar, início).
-    Um espaço do mesmo tamanho do ícone equilibra o outro lado, para o título ficar no meio."""
-    textos: list[ft.Control] = [titulo(titulo_)]
-    if subtitulo_:
-        textos.append(subtitulo(subtitulo_))
+              direita: Optional[ft.Control] = None, tamanho: int = 26) -> ft.Column:
+    """Título centralizado, com um ícone opcional de cada lado (ex.: voltar, configurações).
+
+    Os ícones ficam na altura do título e um espaço do mesmo tamanho equilibra o outro lado,
+    para o título ficar no meio. O subtítulo vem embaixo, com a largura toda."""
+    nome = titulo(titulo_, tamanho)
+    nome.expand = True
     vazio = ft.Container(width=48) if esquerda or direita else None
-    controles = [c for c in (esquerda or vazio, ft.Column(
-        controls=textos, spacing=2, expand=True,
-        horizontal_alignment=ft.CrossAxisAlignment.CENTER), direita or vazio) if c is not None]
-    return ft.Row(controls=controles, vertical_alignment=ft.CrossAxisAlignment.CENTER)
+    linha = ft.Row(controls=[c for c in (esquerda or vazio, nome, direita or vazio)
+                             if c is not None],
+                   vertical_alignment=ft.CrossAxisAlignment.CENTER)
+    controles: list[ft.Control] = [linha]
+    if subtitulo_:
+        controles.append(subtitulo(subtitulo_))
+    return ft.Column(controls=controles, spacing=2,
+                     horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
 
 
 def expansivel(cabeca: list[ft.Control], detalhes: list[ft.Control],
                atualizar: Callable[[], None], nome_detalhes: str = "detalhes",
                fundo: str = t.SUPERFICIE, borda: str = t.BORDA) -> ft.Control:
-    """Cartão que mostra só a `cabeca`. Um toque mostra (ou esconde) os `detalhes`."""
-    ver, esconder = f"Ver {nome_detalhes} ▾", f"Esconder {nome_detalhes} ▴"
+    """Cartão que mostra só a `cabeca`, com uma seta à direita. Um toque no cartão mostra
+    (ou esconde) os `detalhes`, e a seta vira para cima (ou para baixo)."""
     corpo = _coluna(detalhes, espaco=6)
     corpo.visible = False
-    indicador = ft.Text(ver, size=13, color=t.PRIMARIA, weight=ft.FontWeight.W_600,
-                        text_align=CENTRO)
+    seta = ft.Icon(icon=ft.Icons.EXPAND_MORE, color=t.PRIMARIA, size=26,
+                   tooltip=f"Ver {nome_detalhes}")
 
     def alternar(_evento: Any) -> None:
         corpo.visible = not corpo.visible
-        indicador.value = esconder if corpo.visible else ver
+        seta.icon = ft.Icons.EXPAND_LESS if corpo.visible else ft.Icons.EXPAND_MORE
+        seta.tooltip = f"{'Esconder' if corpo.visible else 'Ver'} {nome_detalhes}"
         atualizar()
 
-    return cartao([*cabeca, indicador, corpo], fundo, borda, on_click=alternar)
+    topo = ft.Row(controls=[ft.Column(controls=cabeca, spacing=4, expand=True), seta],
+                  vertical_alignment=ft.CrossAxisAlignment.CENTER)
+    return cartao([topo, corpo], fundo, borda, on_click=alternar)
 
 
 class Contador:
-    """Cartão com o nome em cima e, embaixo, menos, o número e mais (botões redondos grandes)."""
+    """Cartão com o nome em cima e, embaixo, menos, o número e mais (botões redondos e
+    grandes)."""
 
     def __init__(self, rotulo: str, valor: int, minimo: int, maximo: int,
                  ao_mudar: Callable[[int], None], atualizar: Callable[[], None]) -> None:

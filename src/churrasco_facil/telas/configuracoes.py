@@ -20,9 +20,12 @@ def montar(app: AppChurrasco) -> w.Tela:
     chave = ft.TextField(label="Chave do Groq", value=config.chave_groq, password=True,
                          can_reveal_password=True, border_radius=12, text_size=16,
                          text_align=w.CENTRO,
-                         hint_text="Fica só neste aparelho. Também vale a variável GROQ_API_KEY.")
-    situacao = ("IA ligada: o Mestre do Churrasco usa o Groq." if app.cliente().configurado
-                else "Sem chave, o app funciona igual, com respostas prontas e sem internet.")
+                         hint_text="Fica só neste aparelho. Também vale a variável "
+                                   "GROQ_API_KEY.")
+    situacao = ("IA ligada: no passo Quem vem, dá para contar os convidados em palavras."
+                if app.cliente().configurado else
+                "A chave é opcional: sem ela, o app funciona igual e sem internet. Com ela, "
+                "dá para contar os convidados em palavras.")
 
     def chave_digitada() -> str:
         return str(chave.value or "").strip()

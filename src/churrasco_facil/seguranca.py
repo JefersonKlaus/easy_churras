@@ -24,7 +24,8 @@ AVISOS_GERAIS = (
           "A brasa solta monóxido de carbono, um gás sem cheiro que pode matar. Use sempre ao "
           "ar livre, longe de portas e janelas.", True),
     Aviso("acendedor", "Não use álcool nem gasolina para acender",
-          "Líquido inflamável causa queimaduras graves. Use acendedor sólido ou jornal.", True),
+          "Líquido inflamável causa queimaduras graves. Use acendedor sólido ou jornal.",
+          True),
     Aviso("criancas", "Crianças longe da brasa",
           "Marque uma distância segura em volta da churrasqueira e deixe um adulto responsável "
           "por ela o tempo todo."),

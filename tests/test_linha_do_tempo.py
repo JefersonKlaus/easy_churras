@@ -1,11 +1,11 @@
 """Horários e cuidados juntos: cada aviso na hora em que importa."""
 import pytest
+from dados import SERVIR
 
 from churrasco_facil.catalogo_carnes import CORTES
 from churrasco_facil.cronograma import gerar_cronograma
-from churrasco_facil.linha_do_tempo import linha_do_tempo
+from churrasco_facil.linha_do_tempo import cartoes, linha_do_tempo
 from churrasco_facil.seguranca import avisos_para
-from dados import SERVIR
 
 CORTES_DO_TESTE = [CORTES[i] for i in ("picanha", "coxa_sobrecoxa", "bisteca_suina",
                                        "linguica_toscana")]
@@ -54,3 +54,11 @@ def test_aviso_sem_etapa_certa_vai_para_a_primeira_etapa():
 
 def test_sem_etapas_nao_ha_momentos():
     assert linha_do_tempo([], avisos_para(CORTES_DO_TESTE)) == []
+
+
+def test_cartoes_juntam_grelha_e_servir_sem_perder_etapa_nem_cuidado(momentos):
+    lista = cartoes(momentos)
+    assert sum(len(c.momentos) for c in lista) == len(momentos)
+    assert [a.id for c in lista for a in c.avisos] == [a.id for m in momentos for a in m.avisos]
+    assert [c.titulo for c in lista if c.junto] == ["Na grelha", "Tirar e servir"]
+

@@ -1,19 +1,23 @@
-"""Junta tudo: do pedido (quem vem, quando, quanto) ao plano completo, sem usar a IA."""
+"""Junta tudo: do pedido (quem vem, quando, a opção e as carnes) ao plano completo: compras,
+horários e avisos. Também diz se a carne escolhida está certa para o grupo."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import KW_ONLY, dataclass, field, replace
 from datetime import datetime
-from typing import Mapping, Optional
+from typing import Iterable, Mapping, Optional
 
-from .calculadora import Convidados, Parametros, itens_para_lembrar
-from .catalogo_carnes import CORTES, MISTURA_VEGETARIANA, VEGETARIANO, Corte
-from .cronograma import Etapa, formatar_hora, gerar_cronograma
-from .dinheiro import formatar_reais
-from .orcamento import ResultadoOrcamento, custo_por_pessoa, planejar_compras
+from .calculadora import gramas_de_carne, itens_para_lembrar
+from .catalogo_carnes import CORTES, Corte
+from .compras import Compras, custo_por_pessoa, planejar_compras
+from .convidados import Convidados
+from .cronograma import Etapa, gerar_cronograma
+from .parametros import Parametros
+from .pecas import FOLGA_PERCENTUAL, ajustar_pecas
 from .produtos import ItemPlano
 from .seguranca import Aviso, avisos_para
 
-DIAS_DA_SEMANA = ("segunda", "terça", "quarta", "quinta", "sexta", "sábado", "domingo")
+FALTA, SOBRA = "falta", "sobra"          # situacao_da_carne()
+SOBRA_PERCENTUAL = 25                    # acima disso (e com peça a mais), é carne demais
 
 
 @dataclass(frozen=True)
@@ -22,21 +26,23 @@ class Pedido:
 
     convidados: Convidados
     hora_servir: datetime
-    orcamento: Optional[int] = None                    # centavos, None = sem limite
-    pesos_preferidos: dict[str, int] = field(default_factory=dict)
+    _: KW_ONLY                           # o resto só por nome: nada troca de lugar sem querer
+    pesos_preferidos: dict[str, int] = field(default_factory=dict)   # a mistura da opção
     nome: str = "Meu churrasco"
-    secoes_fora: tuple[str, ...] = ()                   # seções que não entram na conta
+    # Carnes que a pessoa marcou: id do corte -> peças. Vazio: o app escolhe as melhores
+    # da opção (os `pesos_preferidos`).
+    pecas_escolhidas: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class Plano:
     pedido: Pedido
-    compras: ResultadoOrcamento
+    compras: Compras
     cortes: list[Corte]
     cronograma: list[Etapa]
     avisos: list[Aviso]
-    explicacao: Optional[str] = None
     lembretes: list[ItemPlano] = field(default_factory=list)   # fora da conta
+    carne_indicada_g: int = 0          # quanto de carne o grupo precisa (a conta por pessoa)
 
     @property
     def custo_total(self) -> int:
@@ -46,60 +52,63 @@ class Plano:
     def custo_por_pessoa(self) -> int:
         return custo_por_pessoa(self.compras.custo_total, self.pedido.convidados.pessoas)
 
+    @property
+    def gramas_de_carne(self) -> int:
+        """Quanto de carne o plano compra (sem contar a grelha vegetariana)."""
+        return self.compras.gramas_de_carne
 
-def cortes_do_plano(pesos: Mapping[str, int], vegetarianos: int) -> list[Corte]:
-    """Cortes que vão à grelha: os escolhidos e, se houver vegetarianos, as opções deles."""
-    ids = [i for i in pesos if i in CORTES]
-    if vegetarianos > 0:
-        ids += list(MISTURA_VEGETARIANA)
-    return [CORTES[i] for i in ids]
+    def situacao_da_carne(self) -> str:
+        """FALTA, SOBRA ou "" (na medida), comparando a carne comprada com a indicada.
+
+        - FALTA: menos que o indicado, além da folga de FOLGA_PERCENTUAL.
+        - SOBRA: passou mais de SOBRA_PERCENTUAL do indicado e dá para tirar uma peça
+          inteira (de qualquer carne) e ainda ter todo o indicado. Com peças inteiras é normal
+          passar um pouco; isso não conta como sobra.
+        """
+        indicada, comprada = self.carne_indicada_g, self.gramas_de_carne
+        if indicada <= 0:
+            return ""
+        minimo = indicada - indicada * FOLGA_PERCENTUAL // 100
+        if comprada < minimo:
+            return FALTA
+        passou = comprada - indicada > indicada * SOBRA_PERCENTUAL // 100
+        if passou and any(comprada - i.produto.peca_g >= indicada for i in self.compras.carnes):
+            return SOBRA
+        return ""
+
+
+def cortes_do_plano(itens: list[ItemPlano]) -> list[Corte]:
+    """Cortes que vão à grelha: os que foram comprados. Como se compra em peças inteiras, um
+    grupo pequeno pode não levar todos os cortes da mistura; horários e avisos seguem a
+    compra, para não mandar grelhar (nem avisar sobre) o que ninguém comprou."""
+    return [i.produto for i in itens if isinstance(i.produto, Corte)]
 
 
 def montar_plano(pedido: Pedido, par: Optional[Parametros] = None,
-                 precos: Optional[Mapping[str, int]] = None,
-                 explicacao: Optional[str] = None) -> Plano:
+                 precos: Optional[Mapping[str, int]] = None) -> Plano:
     """Calcula compras, cronograma e avisos. Mesmo pedido, mesmo plano, sempre."""
-    compras = planejar_compras(pedido.convidados, pedido.orcamento, par, precos,
-                               pedido.pesos_preferidos or None, pedido.secoes_fora)
-    cortes = cortes_do_plano(compras.pesos, pedido.convidados.vegetarianos)
+    compras = planejar_compras(pedido.convidados, par, precos, pedido.pesos_preferidos or None,
+                               pedido.pecas_escolhidas or None)
+    cortes = cortes_do_plano(compras.itens)
     return Plano(
         pedido=pedido,
         compras=compras,
         cortes=cortes,
-        cronograma=gerar_cronograma(pedido.hora_servir, cortes),
+        cronograma=gerar_cronograma(pedido.hora_servir, cortes,
+                                    com_cerveja=pedido.convidados.bebem_alcool > 0),
         avisos=avisos_para(cortes),
-        explicacao=explicacao,
         lembretes=itens_para_lembrar(pedido.convidados, par),
+        carne_indicada_g=gramas_de_carne(pedido.convidados, par or Parametros()),
     )
 
 
-def descrever_data(hora: datetime) -> str:
-    """'sábado, 21/11 às 14:00'."""
-    return f"{DIAS_DA_SEMANA[hora.weekday()]}, {hora:%d/%m} às {formatar_hora(hora)}"
-
-
-def resumo_pedido(conv: Convidados, orcamento: Optional[int]) -> str:
-    """Texto curto com os números do grupo, para enviar ao Groq (sem nomes de pessoas)."""
-    partes = [f"{conv.adultos} adultos", f"{conv.criancas} crianças",
-              f"{conv.vegetarianos} vegetarianos", f"{conv.bebem_alcool} bebem álcool",
-              f"duração {conv.duracao_horas:g} horas"]
-    partes.append(f"orçamento {formatar_reais(orcamento)}" if orcamento else "sem orçamento")
-    return "; ".join(partes)
-
-
-def resumo_plano(plano: Plano) -> str:
-    """O plano em texto, para dar contexto ao Groq. Só números que o código calculou."""
-    linhas = [resumo_pedido(plano.pedido.convidados, plano.pedido.orcamento),
-              f"Hora de servir: {descrever_data(plano.pedido.hora_servir)}"]
-    carnes = [f"{i.produto.nome} ({i.quantidade} g)" for i in plano.compras.itens
-              if isinstance(i.produto, Corte) and i.produto.categoria != VEGETARIANO]
-    linhas.append("Carnes: " + (", ".join(carnes) if carnes else "nenhuma"))
-    if plano.pedido.convidados.vegetarianos:
-        veg = [i.produto.nome for i in plano.compras.itens
-               if isinstance(i.produto, Corte) and i.produto.categoria == VEGETARIANO]
-        linhas.append("Para vegetarianos: " + ", ".join(veg))
-    linhas.append(f"Custo estimado: {formatar_reais(plano.custo_total)}"
-                  + (" (acima do orçamento)" if plano.compras.estourou else ""))
-    linhas.append("Avisos de segurança do app: "
-                  + "; ".join(a.titulo for a in plano.avisos if a.grave))
-    return "\n".join(linhas)
+def trocar_carnes(plano: Plano, marcadas: Iterable[str],
+                  par: Optional[Parametros] = None) -> Pedido:
+    """O pedido com as carnes que a pessoa deixou marcadas (na ordem da lista). Só muda a
+    carne marcada ou desmarcada (`ajustar_pecas`); se faltar ou sobrar carne, a tela avisa."""
+    pedido = plano.pedido
+    ids = [i for i in dict.fromkeys(marcadas) if i in CORTES]
+    atuais = {i.produto.id: -(-i.quantidade // i.produto.peca_g) for i in plano.compras.carnes}
+    pecas = ajustar_pecas(atuais, ids, gramas_de_carne(pedido.convidados, par or Parametros()),
+                          {i: CORTES[i].peca_g for i in ids})
+    return replace(pedido, pecas_escolhidas=pecas)

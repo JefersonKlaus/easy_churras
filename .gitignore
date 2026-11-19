@@ -231,3 +231,6 @@ __marimo__/
 
 # pacote offline (grande, gerado por offline/baixar_pacotes.py)
 vendor/
+
+# ferramentas/capturar.mjs (npm install @sparticuz/chromium puppeteer-core)
+node_modules/

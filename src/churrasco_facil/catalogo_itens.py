@@ -1,4 +1,5 @@
-"""Itens que não são carne: acompanhamentos, bebidas, carvão e descartáveis.
+"""Itens que não são carne: bebidas, carvão e o que é só lembrete (pão de alho, mercearia e
+descartáveis).
 
 Preços são estimativas de referência (em centavos) e o usuário pode trocá-los.
 """
@@ -16,14 +17,7 @@ ITENS: dict[str, Produto] = {p.id: p for p in (
     # Padaria e mercearia
     _p("pao_alho", "Pão de alho", "Padaria", "un", 400),
     _p("farinha_mandioca", "Farinha de mandioca (pacote 500 g)", "Mercearia", "un", 700),
-    _p("arroz", "Arroz (pacote 1 kg)", "Mercearia", "un", 650),
-    _p("vinagre_azeite", "Vinagre e azeite (para o vinagrete)", "Mercearia", "un", 1500),
     _p("sal_grosso", "Sal grosso (pacote 1 kg)", "Mercearia", "un", 450),
-    # Hortifruti (preço por kg)
-    _p("tomate", "Tomate", "Hortifruti", "g", 800, 1000),
-    _p("cebola", "Cebola", "Hortifruti", "g", 600, 1000),
-    _p("pimentao", "Pimentão", "Hortifruti", "g", 1200, 1000),
-    _p("salada_folhas", "Alface e folhas para salada", "Hortifruti", "g", 1500, 1000),
     # Bebidas
     _p("cerveja_lata", "Cerveja (lata 350 ml)", "Bebidas", "un", 550),
     _p("refrigerante_2l", "Refrigerante (garrafa 2 L)", "Bebidas", "un", 900),
@@ -32,7 +26,6 @@ ITENS: dict[str, Produto] = {p.id: p for p in (
     # Carvão e acessórios
     _p("carvao_3kg", "Carvão (saco 3 kg)", "Carvão e acessórios", "un", 2400),
     _p("acendedor", "Acendedor sólido (caixa)", "Carvão e acessórios", "un", 600),
-    _p("papel_aluminio", "Papel-alumínio (rolo)", "Carvão e acessórios", "un", 1100),
     # Descartáveis
     _p("copos", "Copos descartáveis (pacote 50)", "Descartáveis", "un", 900),
     _p("guardanapos", "Guardanapos (pacote 50)", "Descartáveis", "un", 500),

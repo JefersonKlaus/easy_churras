@@ -1,7 +1,7 @@
 import pytest
 
-from churrasco_facil.dinheiro import (custo_proporcional, dividir_centavos, formatar_reais,
-                                      reais_para_centavos, valor_para_campo)
+from churrasco_facil.dinheiro import (custo_proporcional, formatar_reais, reais_para_centavos,
+                                      valor_para_campo)
 
 
 @pytest.mark.parametrize("texto, centavos", [
@@ -34,24 +34,6 @@ def test_valor_para_campo(centavos, texto):
 @pytest.mark.parametrize("centavos", [0, 5, 9500, 123456])
 def test_valor_para_campo_volta_igual_pela_leitura(centavos):
     assert reais_para_centavos(valor_para_campo(centavos)) == centavos
-
-
-@pytest.mark.parametrize("total, partes, esperado", [
-    (100, 3, [34, 33, 33]), (0, 4, [0, 0, 0, 0]),
-])
-def test_dividir_centavos_da_a_sobra_para_os_primeiros(total, partes, esperado):
-    assert dividir_centavos(total, partes) == esperado
-
-
-@pytest.mark.parametrize("total", [1, 99, 10001])
-@pytest.mark.parametrize("partes", [1, 2, 7])
-def test_dividir_centavos_nao_perde_nem_cria_centavo(total, partes):
-    assert sum(dividir_centavos(total, partes)) == total
-
-
-def test_dividir_centavos_exige_ao_menos_uma_parte():
-    with pytest.raises(ValueError):
-        dividir_centavos(100, 0)
 
 
 @pytest.mark.parametrize("preco, por, quantidade, custo", [

@@ -1,11 +1,10 @@
-from datetime import datetime
-
+"""Do pedido ao plano: compras, horários e avisos, e se a carne está certa."""
 import pytest
-
-from churrasco_facil.calculadora import Convidados
-from churrasco_facil.planejador import (Pedido, descrever_data, montar_plano, resumo_pedido,
-                                        resumo_plano)
 from dados import SERVIR
+
+from churrasco_facil.catalogo_carnes import MISTURAS, VEGETARIANO
+from churrasco_facil.convidados import Convidados
+from churrasco_facil.planejador import FALTA, SOBRA, Pedido, montar_plano, trocar_carnes
 
 
 def ids_dos_cortes(plano):
@@ -17,42 +16,62 @@ def test_mesmo_pedido_gera_sempre_o_mesmo_plano(pedido):
     assert (a.compras, a.cronograma, a.avisos) == (b.compras, b.cronograma, b.avisos)
 
 
-def test_plano_tem_cortes_cronograma_e_avisos(plano):
-    assert plano.cortes and plano.cronograma and plano.avisos
+def test_gramas_de_carne_do_plano_nao_contam_a_grelha_vegetariana():
+    plano = montar_plano(Pedido(Convidados(adultos=2, vegetarianos=2), SERVIR))
+    assert plano.compras.itens and plano.gramas_de_carne == 0
 
 
-def test_custo_total_do_plano_vem_das_compras(plano):
-    assert plano.custo_total == plano.compras.custo_total
+def test_horarios_e_avisos_seguem_o_que_foi_comprado():
+    # 4 adultos levam só picanha e linguiça da mistura tradicional (peças inteiras)
+    plano = montar_plano(Pedido(Convidados(adultos=4, duracao_horas=3), SERVIR,
+                                pesos_preferidos=MISTURAS["tradicional"]))
+    assert ids_dos_cortes(plano) == ["picanha", "linguica_toscana"]
+    assert not any("Maminha" in e.titulo for e in plano.cronograma)
+    assert "frango" not in {a.id for a in plano.avisos}
 
 
-def test_custo_por_pessoa_cobre_o_total(plano):
-    assert plano.custo_por_pessoa * plano.pedido.convidados.pessoas >= plano.custo_total
+@pytest.fixture
+def plano_de_4():
+    """4 adultos, tradicional: a melhor compra é só picanha e linguiça."""
+    return montar_plano(Pedido(Convidados(adultos=4, duracao_horas=3), SERVIR,
+                               pesos_preferidos=MISTURAS["tradicional"]))
 
 
-def test_plano_novo_nao_tem_explicacao(plano):
-    assert plano.explicacao is None
+def test_trocar_sem_mudar_nada_da_o_mesmo_plano(plano_de_4):
+    mesmo = montar_plano(trocar_carnes(plano_de_4, ids_dos_cortes(plano_de_4)))
+    assert mesmo.compras.itens == plano_de_4.compras.itens
 
 
-def test_plano_guarda_a_explicacao_recebida(pedido):
-    assert montar_plano(pedido, explicacao="oi").explicacao == "oi"
+def test_carne_marcada_e_comprada_mesmo_fora_da_opcao(plano_de_4):
+    plano = montar_plano(trocar_carnes(plano_de_4, ["picanha", "linguica_toscana",
+                                                    "coracao_frango"]))
+    assert ids_dos_cortes(plano) == ["picanha", "linguica_toscana", "coracao_frango"]
 
 
-def test_lembretes_sao_a_mercearia_e_os_descartaveis(plano):
-    assert {i.produto.secao for i in plano.lembretes} == {"Mercearia", "Descartáveis"}
+def test_melhor_escolha_da_opcao_esta_na_medida(plano_de_4):
+    assert plano_de_4.situacao_da_carne() == ""
 
 
-def test_lembretes_nao_entram_no_custo(plano):
-    assert plano.custo_total == sum(i.custo for i in plano.compras.itens)
-    assert not {i.produto.id for i in plano.lembretes} & {i.produto.id for i in plano.compras.itens}
+def test_desmarcar_carne_deixa_faltar(plano_de_4):
+    menos = montar_plano(trocar_carnes(plano_de_4, ["picanha"]))
+    assert menos.situacao_da_carne() == FALTA
 
 
-def test_secoes_fora_do_pedido_ficam_fora_do_plano(convidados):
-    plano = montar_plano(Pedido(convidados, SERVIR, secoes_fora=("Hortifruti",)))
-    assert "tomate" not in {i.produto.id for i in plano.compras.itens}
+def test_marcar_carne_demais_faz_sobrar(plano_de_4):
+    mais = montar_plano(trocar_carnes(plano_de_4, [*ids_dos_cortes(plano_de_4), "coracao_frango",
+                                                   "alcatra"]))
+    assert mais.situacao_da_carne() == SOBRA
+
+
+def test_passar_um_pouco_por_causa_das_pecas_nao_e_sobra():
+    # 1 adulto: 500 g indicados, 2 bifes (800 g) é o mínimo de peças inteiras
+    plano = montar_plano(Pedido(Convidados(adultos=1), SERVIR,
+                                pesos_preferidos=MISTURAS["premium"]))
+    assert plano.gramas_de_carne > plano.carne_indicada_g and plano.situacao_da_carne() == ""
 
 
 def test_cortes_preferidos_viram_os_cortes_do_plano():
-    plano = montar_plano(Pedido(Convidados(adultos=4), SERVIR, None, {"alcatra": 1}))
+    plano = montar_plano(Pedido(Convidados(adultos=4), SERVIR, pesos_preferidos={"alcatra": 1}))
     assert ids_dos_cortes(plano) == ["alcatra"]
 
 
@@ -63,34 +82,4 @@ def test_sem_vegetarianos_nao_ha_opcao_vegetariana():
 
 def test_com_vegetarianos_ha_opcao_vegetariana():
     plano = montar_plano(Pedido(Convidados(adultos=4, vegetarianos=1), SERVIR))
-    assert "queijo_coalho" in ids_dos_cortes(plano)
-
-
-def test_opcao_vegetariana_entra_no_cronograma():
-    plano = montar_plano(Pedido(Convidados(adultos=4, vegetarianos=1), SERVIR))
-    assert any("Queijo coalho" in e.titulo for e in plano.cronograma)
-
-
-@pytest.mark.parametrize("hora, texto", [
-    (SERVIR, "sábado, 21/11 às 14:00"), (datetime(2026, 11, 22, 9, 5), "domingo, 22/11 às 09:05"),
-])
-def test_descrever_data(hora, texto):
-    assert descrever_data(hora) == texto
-
-
-def test_resumo_do_pedido_so_tem_numeros(convidados):
-    assert resumo_pedido(convidados, 60000) == (
-        "10 adultos; 3 crianças; 1 vegetarianos; 6 bebem álcool; duração 5 horas; "
-        "orçamento R$ 600,00")
-
-
-def test_resumo_do_pedido_sem_orcamento():
-    assert resumo_pedido(Convidados(adultos=2), None).endswith("sem orçamento")
-
-
-@pytest.mark.parametrize("trecho", [
-    "Hora de servir: sábado, 21/11 às 14:00", "Carnes:", "Para vegetarianos:",
-    "Custo estimado:", "Avisos de segurança",
-])
-def test_resumo_do_plano_para_a_ia(plano, trecho):
-    assert trecho in resumo_plano(plano)
+    assert any(c.categoria == VEGETARIANO for c in plano.cortes)

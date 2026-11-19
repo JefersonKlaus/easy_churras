@@ -6,8 +6,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from .calculadora import MAX_PESSOAS
-from .catalogo_carnes import CORTES, VEGETARIANO
+from .convidados import MAX_PESSOAS
 
 
 class ErroEsquema(ValueError):
@@ -23,15 +22,7 @@ class PedidoInterpretado:
     vegetarianos: Optional[int] = None
     bebem_alcool: Optional[int] = None
     duracao_horas: Optional[float] = None
-    orcamento_centavos: Optional[int] = None
-    observacoes: str = ""
-    faltando: tuple[str, ...] = field(default_factory=tuple)
-
-
-@dataclass(frozen=True)
-class Sugestao:
-    id: str
-    motivo: str
+    faltando: tuple[str, ...] = field(default_factory=tuple)   # o que não deu para saber
 
 
 def extrair_json(texto: str) -> Any:
@@ -77,50 +68,13 @@ def interpretar_pedido(texto: str) -> PedidoInterpretado:
     if not isinstance(dados, dict):
         raise ErroEsquema("esperava um objeto JSON")
     horas = _numero(dados, "duracao_horas")
-    reais = _numero(dados, "orcamento_reais")
-    orcamento = int(round(reais * 100)) if reais is not None and 0 < reais <= 1_000_000 else None
     faltando = dados.get("faltando")
     faltando_ok = tuple(str(f)[:40] for f in faltando[:6]) if isinstance(faltando, list) else ()
-    observacoes = dados.get("observacoes")
     return PedidoInterpretado(
         adultos=_inteiro(dados, "adultos"),
         criancas=_inteiro(dados, "criancas"),
         vegetarianos=_inteiro(dados, "vegetarianos"),
         bebem_alcool=_inteiro(dados, "bebem_alcool"),
         duracao_horas=horas if horas is not None and 1 <= horas <= 12 else None,
-        orcamento_centavos=orcamento,
-        observacoes=observacoes.strip()[:300] if isinstance(observacoes, str) else "",
         faltando=faltando_ok,
     )
-
-
-def interpretar_sugestoes(texto: str, maximo: int = 6) -> list[Sugestao]:
-    """Lê as sugestões de cortes. Descarta ids que não existem, repetidos e vegetarianos."""
-    dados = extrair_json(texto)
-    lista = dados.get("cortes") if isinstance(dados, dict) else None
-    if not isinstance(lista, list):
-        raise ErroEsquema("faltou a lista 'cortes'")
-    vistos: set[str] = set()
-    sugestoes: list[Sugestao] = []
-    for entrada in lista:
-        if not isinstance(entrada, dict):
-            continue
-        id = entrada.get("id")
-        if not isinstance(id, str) or id not in CORTES or id in vistos:
-            continue
-        if CORTES[id].categoria == VEGETARIANO:
-            continue
-        vistos.add(id)
-        motivo = entrada.get("motivo")
-        sugestoes.append(Sugestao(id, motivo.strip()[:200] if isinstance(motivo, str) else ""))
-        if len(sugestoes) >= maximo:
-            break
-    if not sugestoes:
-        raise ErroEsquema("nenhum corte válido na resposta")
-    return sugestoes
-
-
-def limpar_texto_livre(texto: str, maximo: int = 800) -> str:
-    """Texto da IA para mostrar na tela: tira cercas de código e limita o tamanho."""
-    limpo = re.sub(r"```.*?```", "", texto or "", flags=re.S).strip()
-    return limpo[:maximo]

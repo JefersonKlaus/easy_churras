@@ -1,24 +1,23 @@
 """O aplicativo: guarda o estado e leva o usuário de uma tela para outra."""
 from __future__ import annotations
 
-import inspect
 import logging
-from typing import Any, Optional, Union
+from typing import Iterable, Optional
 
 import flet as ft
 
 from .armazenamento import Armazenamento
-from .calculadora import Parametros
 from .assistente import Assistente
 from .cliente_groq import ClienteGroq
-from .modo_offline import AssistenteComReserva, AssistenteLocal, ConversaLocal
 from .configuracao import (Configuracao, carregar_configuracao, cliente_da_configuracao,
                            parametros_da_configuracao)
-from .conversa import Conversa
-from .entradas import Rascunho
-from .planejador import Plano, montar_plano, resumo_plano
-from .telas import (assistente_passos, configuracoes, conversa, cronograma, inicio, lista,
-                    navegacao, plano, tema)
+from .modo_offline.assistente_local import AssistenteLocal
+from .modo_offline.reserva import AssistenteComReserva
+from .parametros import Parametros
+from .planejador import Plano, montar_plano, trocar_carnes
+from .rascunho import Rascunho
+from .telas import carnes, compras, configuracoes, horarios, inicio, navegacao, passos, tema
+from .telas.aparelho import Aparelho
 from .telas.widgets import Tela
 
 logger = logging.getLogger(__name__)
@@ -35,10 +34,11 @@ class AppChurrasco:
         self.rascunho = Rascunho()
         self.plano: Optional[Plano] = None
         self.plano_id: Optional[int] = None
-        self.motivos: dict[str, str] = {}      # por que o Groq sugeriu cada corte
+        self.salvo = False                     # o plano aberto está igual ao que foi salvo?
+        self.aba = navegacao.CARNES            # a aba do plano que está aberta
         self.aviso: str = ""                   # recado para a próxima tela (ex.: sem IA)
-        self.conversa: Optional[Union[Conversa, ConversaLocal]] = None
-        self.ocupado = False
+        self.ocupado = False                   # esperando o Groq: não aceita outro toque
+        self.aparelho = Aparelho(page)
 
     # ------------------------------------------------------------------ ajudantes
 
@@ -62,6 +62,8 @@ class AppChurrasco:
         """Troca a tela. O topo e o rodapé da tela ficam fixos; só o conteúdo rola.
         Nas abas do plano, a barra de abas aparece no rodapé."""
         com_abas = aba is not None and self.plano is not None
+        if com_abas:
+            self.aba = aba
         self.page.navigation_bar = navegacao.barra(self, aba) if com_abas else None
         self.page.clean()
         self.page.add(*tela.topo,
@@ -70,98 +72,66 @@ class AppChurrasco:
                                 horizontal_alignment=ft.CrossAxisAlignment.STRETCH),
                       *tela.rodape)
 
-    async def copiar(self, texto: str) -> bool:
-        """Copia para a área de transferência. A API muda entre versões do Flet: tenta as
-        formas conhecidas e devolve False se nenhuma funcionar."""
-        formas = []
-        if hasattr(self.page, "set_clipboard"):
-            formas.append(lambda: self.page.set_clipboard(texto))
-        area = getattr(self.page, "clipboard", None)
-        if area is not None and hasattr(area, "set"):
-            formas.append(lambda: area.set(texto))
-        for forma in formas:
-            try:
-                resultado: Any = forma()
-                if inspect.isawaitable(resultado):
-                    await resultado
-                return True
-            except Exception:  # a API de cada versão do Flet falha de um jeito diferente
-                logger.debug("forma de copiar falhou", exc_info=True)
-        return False
-
     # ------------------------------------------------------------------ navegação
 
     def ir_inicio(self) -> None:
         self.mostrar(inicio.montar(self))
 
     def ir_assistente(self, passo: int = 0) -> None:
-        self.mostrar(assistente_passos.montar(self, passo))
+        self.mostrar(passos.montar(self, passo))
 
-    def ir_plano(self) -> None:
-        self.mostrar(plano.montar(self), navegacao.CARNES)
+    def ir_carnes(self) -> None:
+        self.mostrar(carnes.montar(self), navegacao.CARNES)
 
-    def ir_lista(self) -> None:
-        self.salvar_plano()
-        self.mostrar(lista.montar(self), navegacao.COMPRAS)
+    def ir_compras(self) -> None:
+        self.mostrar(compras.montar(self), navegacao.COMPRAS)
 
-    def ir_cronograma(self) -> None:
-        self.salvar_plano()
-        self.mostrar(cronograma.montar(self), navegacao.HORARIOS)
-
-    def ir_conversa(self) -> None:
-        if self.plano is not None and self.conversa is None:
-            cliente = self.cliente()
-            if cliente.configurado:
-                self.conversa = Conversa(cliente, resumo_plano(self.plano),
-                                         ConversaLocal(self.plano))
-            else:
-                self.conversa = ConversaLocal(self.plano)
-        self.mostrar(conversa.montar(self), navegacao.MESTRE)
+    def ir_horarios(self) -> None:
+        self.mostrar(horarios.montar(self), navegacao.HORARIOS)
 
     def ir_configuracoes(self) -> None:
         self.mostrar(configuracoes.montar(self))
 
     def salvar_plano(self) -> None:
-        """Salva o plano aberto em "Meus churrascos", uma vez só, e avisa na próxima tela.
-        Quem abre as compras ou os horários vai mesmo fazer o churrasco: é a hora de salvar."""
-        if self.plano is None or self.plano_id is not None:
+        """Salva o plano aberto em "Meus churrascos" (botão Salvar). Se ele já foi salvo
+        antes, grava por cima, em vez de criar outro."""
+        if self.plano is None:
             return
-        self.plano_id = self.banco.salvar(self.plano.pedido, self.plano.explicacao)
-        self.aviso = "Plano salvo em Meus churrascos."
+        if self.plano_id is None:
+            self.plano_id = self.banco.salvar(self.plano.pedido)
+        else:
+            self.banco.atualizar(self.plano_id, self.plano.pedido)
+        self.salvo = True
+
+    def trocar_cortes(self, ids: Iterable[str]) -> None:
+        """A pessoa marcou ou desmarcou carnes: o plano é refeito (e fica por salvar)."""
+        if self.plano is None:
+            return
+        pedido = trocar_carnes(self.plano, ids, self.parametros())
+        self.plano = montar_plano(pedido, self.parametros(), self.config.precos)
+        self.salvo = False
 
     def abrir_salvo(self, id: int) -> None:
         """Carrega um plano salvo e mostra a tela do plano."""
-        pedido, explicacao = self.banco.carregar(id)
-        self.plano = montar_plano(pedido, self.parametros(), self.config.precos, explicacao)
-        self.plano_id, self.motivos, self.aviso, self.conversa = id, {}, "", None
-        self.ir_plano()
+        self.plano = montar_plano(self.banco.carregar(id), self.parametros(), self.config.precos)
+        self.plano_id, self.salvo, self.aviso = id, True, ""
+        self.ir_carnes()
 
-    def novo_plano(self, pedido_plano: Plano, motivos: dict[str, str], aviso: str) -> None:
-        self.plano, self.plano_id, self.motivos = pedido_plano, None, motivos
-        self.aviso, self.conversa = aviso, None
-        self.ir_plano()
-
-
-async def travar_em_retrato(page: ft.Page) -> None:
-    """No celular, o app fica sempre em pé (retrato). No computador e na web o Flet não
-    deixa travar: lá a janela já abre em pé (430 x 900)."""
-    plataforma = getattr(page, "platform", None)
-    if plataforma is None or not plataforma.is_mobile():
-        return
-    try:
-        await page.set_allowed_device_orientations([ft.DeviceOrientation.PORTRAIT_UP])
-    except Exception:  # versão do Flet ou aparelho sem suporte: segue sem travar
-        logger.debug("não consegui travar a tela em retrato", exc_info=True)
+    def novo_plano(self, novo: Plano) -> None:
+        """O plano da opção escolhida, com as melhores carnes dela. Ainda não está salvo."""
+        self.plano, self.plano_id, self.salvo, self.aviso = novo, None, False, ""
+        self.ir_carnes()
 
 
 async def main(page: ft.Page) -> None:
     """Ponto de entrada passado para `ft.run`."""
     page.title = "Churrasco Fácil"
     tema.aplicar(page)
-    await travar_em_retrato(page)
+    app = AppChurrasco(page)
+    await app.aparelho.travar_em_retrato()
     try:
         page.window.width = 430
         page.window.height = 900
     except Exception:  # janela não configurável (web/celular): sem problema
         logger.debug("window não configurável", exc_info=True)
-    AppChurrasco(page).ir_inicio()
+    app.ir_inicio()

@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "easy-churras"
-version = "0.0.1"
-description = "Aplicativo que ajuda quem nunca fez churrasco a planejar o seu, com a ajuda da IA do Groq."
+version = "1.0.0"
+description = "Seu primeiro churrasco sem sufoco: quanto comprar, quanto custa e a que horas fazer cada coisa."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -20,12 +20,42 @@ dev = [
 [tool.setuptools.packages.find]
 where = ["src"]
 
+# Publicação (flet build apk / aab / ipa). O ícone e a tela de abertura vêm de src/assets
+# (gerados por ferramentas/gerar_icones.py).
 [tool.flet]
 product = "Churrasco Fácil"
+# ATENÇÃO: o bundle_id é a identidade do app nas lojas e não muda depois de publicar.
+# Troque "com.easychurras" pelo domínio (ao contrário) de quem publica.
+org = "com.easychurras"
+bundle_id = "com.easychurras.churrascofacil"
+company = "Churrasco Fácil"
+copyright = "Copyright (C) 2026 Churrasco Fácil"
+icon_background = "#C2410C"          # o laranja do app (telas/tema.py: PRIMARIA)
 
 [tool.flet.app]
 path = "src"
 
+[tool.flet.splash]
+color = "#FAFAF9"                    # o fundo das telas (telas/tema.py: FUNDO)
+dark_color = "#FAFAF9"               # o app é sempre claro
+
+[tool.flet.boot_screen]
+name = "flet"
+
+[tool.flet.boot_screen.flet]
+bgcolor_light = "#FAFAF9"
+bgcolor_dark = "#FAFAF9"
+startup_message = "Acendendo a brasa..."
+
 [tool.pytest.ini_options]
-pythonpath = ["src", "tests", "tests/telas"]
+pythonpath = ["src", "tests/apoio"]
 testpaths = ["tests"]
+# um arquivo de teste por módulo, na mesma pasta que o módulo (ex.: tests/telas/test_compras.py
+# para src/.../telas/compras.py): nomes repetidos em pastas diferentes pedem este modo
+addopts = "--import-mode=importlib"
+
+[tool.isort]
+line_length = 98
+multi_line_output = 0
+known_first_party = ["churrasco_facil"]
+

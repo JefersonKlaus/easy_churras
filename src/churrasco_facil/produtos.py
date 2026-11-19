@@ -7,12 +7,12 @@ from typing import Mapping, Optional
 from .dinheiro import custo_proporcional
 
 # Ordem em que as seções aparecem na lista de compras (a ordem do corredor do mercado).
-SECOES = ("Açougue", "Hortifruti", "Padaria", "Frios e laticínios", "Mercearia",
+# Hortifruti só aparece com vegetarianos: é onde se compram os legumes e cogumelos da grelha.
+ACOUGUE = "Açougue"
+SECOES = (ACOUGUE, "Hortifruti", "Padaria", "Frios e laticínios", "Mercearia",
           "Bebidas", "Carvão e acessórios", "Descartáveis")
-# Seções que a pessoa decide se entram na conta (os acompanhamentos, não a grelha).
-SECOES_OPCIONAIS = ("Hortifruti",)
 # Seções que são só um lembrete ("não esqueça"): aparecem na lista, mas ficam fora da conta.
-SECOES_LEMBRETE = ("Mercearia", "Descartáveis")
+SECOES_LEMBRETE = ("Padaria", "Mercearia", "Descartáveis")
 
 
 @dataclass(frozen=True)

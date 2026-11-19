@@ -1,18 +1,19 @@
-"""Planos salvos em SQLite. Guardamos só o pedido: o plano é recalculado ao abrir."""
+"""Planos salvos em SQLite ("Meus churrascos"). Guardamos só o pedido: o plano é recalculado
+ao abrir (veja `serializacao`)."""
 from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
-from .calculadora import Convidados
-from .catalogo_carnes import CORTES
-from .configuracao import pasta_de_dados
+from .pastas import pasta_de_dados
 from .planejador import Pedido
-from .produtos import SECOES_OPCIONAIS
+from .serializacao import pedido_de_dict, pedido_para_dict
 
 NOME_BANCO = "planos.sqlite3"
 VERSAO = 1
@@ -20,46 +21,11 @@ VERSAO = 1
 
 @dataclass(frozen=True)
 class PlanoSalvo:
+    """Um item de "Meus churrascos": o que a tela inicial mostra."""
+
     id: int
     nome: str
-    criado_em: datetime
     hora_servir: datetime
-
-
-def pedido_para_dict(pedido: Pedido) -> dict[str, Any]:
-    c = pedido.convidados
-    return {
-        "nome": pedido.nome,
-        "hora_servir": pedido.hora_servir.isoformat(timespec="minutes"),
-        "orcamento": pedido.orcamento,
-        "pesos_preferidos": pedido.pesos_preferidos,
-        "secoes_fora": list(pedido.secoes_fora),
-        "convidados": {"adultos": c.adultos, "criancas": c.criancas,
-                       "vegetarianos": c.vegetarianos, "bebem_alcool": c.bebem_alcool,
-                       "duracao_horas": c.duracao_horas},
-    }
-
-
-def pedido_de_dict(dados: dict[str, Any]) -> Pedido:
-    """Reconstrói o pedido. Levanta ValueError se o registro estiver corrompido."""
-    try:
-        conv = dados["convidados"]
-        orcamento = dados.get("orcamento")
-        pesos = dados.get("pesos_preferidos") or {}
-        fora = dados.get("secoes_fora") or []       # planos antigos não têm este campo
-        return Pedido(
-            convidados=Convidados(adultos=int(conv["adultos"]), criancas=int(conv["criancas"]),
-                                  vegetarianos=int(conv["vegetarianos"]),
-                                  bebem_alcool=int(conv["bebem_alcool"]),
-                                  duracao_horas=float(conv["duracao_horas"])),
-            hora_servir=datetime.fromisoformat(dados["hora_servir"]),
-            orcamento=int(orcamento) if orcamento else None,
-            pesos_preferidos={k: int(v) for k, v in pesos.items() if k in CORTES},
-            nome=str(dados.get("nome") or "Meu churrasco")[:60],
-            secoes_fora=tuple(s for s in SECOES_OPCIONAIS if s in fora),
-        )
-    except (KeyError, TypeError, AttributeError) as erro:
-        raise ValueError(f"registro inválido: {erro}") from None
 
 
 class Armazenamento:
@@ -70,82 +36,63 @@ class Armazenamento:
         self._memoria: Optional[sqlite3.Connection] = None
         if self.caminho == ":memory:":
             self._memoria = sqlite3.connect(":memory:")
-        elif self.caminho != ":memory:":
+        else:
             Path(self.caminho).parent.mkdir(parents=True, exist_ok=True)
-        self._criar_tabelas()
+        with self._conexao() as con:
+            con.execute("CREATE TABLE IF NOT EXISTS planos ("
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL, "
+                        "criado_em TEXT NOT NULL, hora_servir TEXT NOT NULL, "
+                        "dados TEXT NOT NULL)")
+            con.execute(f"PRAGMA user_version = {VERSAO}")
 
-    def _conectar(self) -> sqlite3.Connection:
-        return self._memoria or sqlite3.connect(self.caminho)
-
-    def _fechar(self, con: sqlite3.Connection) -> None:
-        if con is not self._memoria:
-            con.close()
-
-    def _criar_tabelas(self) -> None:
-        con = self._conectar()
+    @contextmanager
+    def _conexao(self) -> Iterator[sqlite3.Connection]:
+        """Uma conexão com transação (grava tudo ou nada), fechada no fim."""
+        con = self._memoria or sqlite3.connect(self.caminho)
         try:
             with con:
-                con.execute("CREATE TABLE IF NOT EXISTS planos ("
-                            "id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL, "
-                            "criado_em TEXT NOT NULL, hora_servir TEXT NOT NULL, "
-                            "dados TEXT NOT NULL, explicacao TEXT)")
-                con.execute(f"PRAGMA user_version = {VERSAO}")
+                yield con
         finally:
-            self._fechar(con)
+            if con is not self._memoria:
+                con.close()
 
-    def salvar(self, pedido: Pedido, explicacao: Optional[str] = None,
-               agora: Optional[datetime] = None) -> int:
-        con = self._conectar()
-        try:
-            with con:
-                cursor = con.execute(
-                    "INSERT INTO planos (nome, criado_em, hora_servir, dados, explicacao) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (pedido.nome, (agora or datetime.now()).isoformat(timespec="seconds"),
-                     pedido.hora_servir.isoformat(timespec="minutes"),
-                     json.dumps(pedido_para_dict(pedido), ensure_ascii=False), explicacao))
-                return int(cursor.lastrowid)
-        finally:
-            self._fechar(con)
+    def salvar(self, pedido: Pedido, agora: Optional[datetime] = None) -> int:
+        with self._conexao() as con:
+            cursor = con.execute(
+                "INSERT INTO planos (nome, criado_em, hora_servir, dados) VALUES (?, ?, ?, ?)",
+                (pedido.nome, (agora or datetime.now()).isoformat(timespec="seconds"),
+                 pedido.hora_servir.isoformat(timespec="minutes"), _json(pedido)))
+            return int(cursor.lastrowid)
+
+    def atualizar(self, id: int, pedido: Pedido) -> bool:
+        """Grava o pedido por cima de um plano já salvo (ex.: a pessoa trocou as carnes)."""
+        with self._conexao() as con:
+            return con.execute(
+                "UPDATE planos SET nome = ?, hora_servir = ?, dados = ? WHERE id = ?",
+                (pedido.nome, pedido.hora_servir.isoformat(timespec="minutes"), _json(pedido),
+                 id)).rowcount > 0
 
     def listar(self) -> list[PlanoSalvo]:
         """Do mais recente para o mais antigo."""
-        con = self._conectar()
-        try:
-            linhas = con.execute("SELECT id, nome, criado_em, hora_servir FROM planos "
+        with self._conexao() as con:
+            linhas = con.execute("SELECT id, nome, hora_servir FROM planos "
                                  "ORDER BY id DESC").fetchall()
-        finally:
-            self._fechar(con)
-        return [PlanoSalvo(i, n, datetime.fromisoformat(c), datetime.fromisoformat(h))
-                for i, n, c, h in linhas]
+        return [PlanoSalvo(i, n, datetime.fromisoformat(h)) for i, n, h in linhas]
 
-    def carregar(self, id: int) -> tuple[Pedido, Optional[str]]:
-        con = self._conectar()
-        try:
-            linha = con.execute("SELECT dados, explicacao FROM planos WHERE id = ?",
-                                (id,)).fetchone()
-        finally:
-            self._fechar(con)
+    def carregar(self, id: int) -> Pedido:
+        with self._conexao() as con:
+            linha = con.execute("SELECT dados FROM planos WHERE id = ?", (id,)).fetchone()
         if linha is None:
             raise KeyError(f"plano {id} não existe")
         try:
-            return pedido_de_dict(json.loads(linha[0])), linha[1]
+            return pedido_de_dict(json.loads(linha[0]))
         except json.JSONDecodeError:
             raise ValueError("registro corrompido") from None
 
-    def atualizar_explicacao(self, id: int, explicacao: str) -> bool:
-        con = self._conectar()
-        try:
-            with con:
-                return con.execute("UPDATE planos SET explicacao = ? WHERE id = ?",
-                                   (explicacao, id)).rowcount > 0
-        finally:
-            self._fechar(con)
-
     def excluir(self, id: int) -> bool:
-        con = self._conectar()
-        try:
-            with con:
-                return con.execute("DELETE FROM planos WHERE id = ?", (id,)).rowcount > 0
-        finally:
-            self._fechar(con)
+        with self._conexao() as con:
+            return con.execute("DELETE FROM planos WHERE id = ?", (id,)).rowcount > 0
+
+
+def _json(pedido: Pedido) -> str:
+    return json.dumps(pedido_para_dict(pedido), ensure_ascii=False)

@@ -6,7 +6,8 @@ para a grelha. Assim a pessoa sabe quando precisa tomar cada cuidado.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable
+from datetime import datetime
+from typing import Iterable, Optional
 
 from .catalogo_carnes import FRANGO, LINGUICA, SUINA
 from .cronograma import Etapa
@@ -48,3 +49,47 @@ def linha_do_tempo(cronograma: list[Etapa], avisos: Iterable[Aviso]) -> list[Mom
         if cronograma:
             por_etapa[destino].append(aviso)
     return [Momento(e, tuple(a)) for e, a in zip(cronograma, por_etapa, strict=True)]
+
+
+# Etapas que viram um cartão só na tela: chave da etapa -> título do cartão.
+JUNTAS = {"grelha": "Na grelha", "descansar": "Tirar e servir", "servir": "Tirar e servir"}
+
+
+@dataclass(frozen=True)
+class Cartao:
+    """Um cartão dos Horários: uma etapa sozinha, ou várias juntas (todas as carnes que vão
+    para a grelha; tirar cada uma e servir). Fica na hora do primeiro item."""
+
+    titulo: str
+    momentos: tuple[Momento, ...]
+
+    @property
+    def hora(self) -> datetime:
+        return self.momentos[0].etapa.hora
+
+    @property
+    def junto(self) -> bool:
+        return self.titulo in JUNTAS.values()
+
+    @property
+    def avisos(self) -> tuple[Aviso, ...]:
+        """Os cuidados de todos os itens do cartão, sem repetir."""
+        return tuple(dict.fromkeys(a for m in self.momentos for a in m.avisos))
+
+
+def cartoes(momentos: Iterable[Momento]) -> list[Cartao]:
+    """Junta num cartão só o que vai para a grelha e, em outro, o que sai dela e o servir.
+    Os outros momentos ficam um por cartão, na ordem de hora."""
+    juntos: dict[str, list[Momento]] = {}
+    lista: list[tuple[datetime, str, Optional[list[Momento]]]] = []
+    for momento in momentos:
+        titulo = JUNTAS.get(momento.etapa.chave)
+        if titulo is None:
+            lista.append((momento.etapa.hora, momento.etapa.titulo, [momento]))
+        elif titulo in juntos:
+            juntos[titulo].append(momento)
+        else:
+            juntos[titulo] = [momento]
+            lista.append((momento.etapa.hora, titulo, juntos[titulo]))
+    return [Cartao(titulo, tuple(ms)) for _, titulo, ms in lista if ms]
+

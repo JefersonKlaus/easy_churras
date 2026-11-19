@@ -1,4 +1,5 @@
-"""Configurações do usuário, guardadas só no aparelho (chave, modelo, preços, quantidades)."""
+"""Configurações do usuário, guardadas só no aparelho (chave, modelo, preços, quantidades):
+ler e gravar o arquivo, e o que sai delas (a chave que vale, a tabela, o cliente do Groq)."""
 from __future__ import annotations
 
 import json
@@ -6,18 +7,16 @@ import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Mapping, Optional
+from typing import Optional
 
-from .calculadora import Parametros
-from .catalogo_carnes import CORTES
-from .catalogo_itens import ITENS
 from .cliente_groq import MODELO_PADRAO, ClienteGroq
-from .dinheiro import reais_para_centavos
+from .parametros import Parametros
+from .pastas import pasta_de_dados
+from .precos import precos_validos
 
 logger = logging.getLogger(__name__)
 
 NOME_ARQUIVO = "configuracao.json"
-PRECO_MAXIMO = 10_000_00   # R$ 10.000,00 por unidade base: acima disso é erro de digitação
 
 
 @dataclass
@@ -28,47 +27,8 @@ class Configuracao:
     parametros: dict[str, float] = field(default_factory=dict)  # campo de Parametros -> valor
 
 
-def pasta_de_dados() -> Path:
-    """CHURRASCO_DADOS (testes) > pasta de dados do Flet > pasta do usuário."""
-    for variavel in ("CHURRASCO_DADOS", "FLET_APP_STORAGE_DATA"):
-        valor = os.environ.get(variavel)
-        if valor:
-            return Path(valor)
-    return Path.home() / ".churrasco_facil"
-
-
 def caminho_configuracao() -> Path:
     return pasta_de_dados() / NOME_ARQUIVO
-
-
-def _precos_limpos(bruto: object) -> dict[str, int]:
-    if not isinstance(bruto, dict):
-        return {}
-    validos = set(CORTES) | set(ITENS)
-    return {k: v for k, v in bruto.items()
-            if k in validos and isinstance(v, int) and not isinstance(v, bool)
-            and 0 <= v <= PRECO_MAXIMO}
-
-
-def juntar_precos(atuais: Mapping[str, int], digitados: Mapping[str, str]) -> dict[str, int]:
-    """Junta aos preços salvos os que o usuário digitou (em reais), por id do produto.
-
-    Preço igual ao do catálogo não é guardado. Levanta ValueError citando o produto.
-    """
-    novos = dict(atuais)
-    for id, texto in digitados.items():
-        produto = CORTES.get(id) or ITENS[id]
-        try:
-            centavos = reais_para_centavos(texto)
-        except ValueError as erro:
-            raise ValueError(f"{produto.nome}: {erro}") from None
-        if centavos > PRECO_MAXIMO:
-            raise ValueError(f"{produto.nome}: preço alto demais")
-        if centavos == produto.preco:
-            novos.pop(id, None)
-        else:
-            novos[id] = centavos
-    return novos
 
 
 def carregar_configuracao(caminho: Optional[Path] = None) -> Configuracao:
@@ -88,7 +48,7 @@ def carregar_configuracao(caminho: Optional[Path] = None) -> Configuracao:
         chave_groq=chave.strip() if isinstance(chave, str) else "",
         modelo=modelo.strip()[:80] if isinstance(modelo, str) and modelo.strip()
         else MODELO_PADRAO,
-        precos=_precos_limpos(dados.get("precos")),
+        precos=precos_validos(dados.get("precos")),
         parametros=alterados,
     )
 

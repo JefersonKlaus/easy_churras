@@ -36,14 +36,6 @@ def valor_para_campo(centavos: int) -> str:
     return f"{centavos / 100:.2f}".replace(".", ",")
 
 
-def dividir_centavos(total: int, partes: int) -> list[int]:
-    """Divide sem perder centavo: as primeiras pessoas ficam com o centavo que sobra."""
-    if partes < 1:
-        raise ValueError("partes deve ser pelo menos 1")
-    base, sobra = divmod(total, partes)
-    return [base + (1 if i < sobra else 0) for i in range(partes)]
-
-
 def custo_proporcional(preco: int, por_quantidade: int, quantidade: int) -> int:
     """Custo em centavos de `quantidade` quando `por_quantidade` custa `preco` (arredonda
     para cima na metade). Ex.: R$ 40,00 o kg e 250 g -> custo_proporcional(4000, 1000, 250)."""
